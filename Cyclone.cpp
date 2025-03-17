@@ -294,9 +294,10 @@ static void computeHash160BatchBinSingle(int numKeys, uint8_t pubKeys[][33], uin
 
 //------------------------------------------------------------------------------
 static void printUsage(const char *programName) {
-    std::cerr << "Usage: " << programName << " -h <hash160_hex> [-p <puzzle> | -r <startHex:endHex>] -b <prefix_length> [-R | -S]\n";
+    std::cerr << "Usage: " << programName << " -h <hash160_hex> [-p <puzzle> | -r <startHex:endHex>] -b <prefix_length> [-R | -S] [-t <threads>]\n";
     std::cerr << "  -R : Use random mode (default is sequential)\n";
     std::cerr << "  -S : Use sequential mode\n";
+    std::cerr << "  -t : Number of CPU threads to use (default: all available cores)\n";
 }
 
 static std::string formatElapsedTime(double seconds) {
@@ -456,6 +457,7 @@ int main(int argc, char *argv[]) {
     std::vector<uint8_t> targetHash160;
     int puzzle = 0; // Declare puzzle variable
     std::string rangeStartHex, rangeEndHex;
+    int numThreads = omp_get_num_procs(); // Default to all available CPU cores
 
     // Parse command-line arguments
     for (int i = 1; i < argc; i++) {
@@ -494,6 +496,12 @@ int main(int argc, char *argv[]) {
             randomMode = true; // Enable random mode
         } else if (!std::strcmp(argv[i], "-S")) {
             randomMode = false; // Enable sequential mode
+        } else if (!std::strcmp(argv[i], "-t") && i + 1 < argc) {
+            numThreads = std::stoi(argv[++i]);
+            if (numThreads <= 0) {
+                std::cerr << "Invalid number of threads. Must be greater than 0.\n";
+                return 1;
+            }
         } else {
             std::cerr << "Unknown parameter: " << argv[i] << "\n";
             printUsage(argv[0]);
@@ -572,14 +580,13 @@ int main(int argc, char *argv[]) {
 
     const long double totalRangeLD = hexStrToLongDouble(rangeSizeHex);
 
-    const int numCPUs = omp_get_num_procs();
-    g_threadPrivateKeys.resize(numCPUs, "0");
+    g_threadPrivateKeys.resize(numThreads, "0");
 
-    auto [chunkSize, remainder] = bigNumDivide(rangeSize, (uint64_t)numCPUs);
-    g_threadRanges.resize(numCPUs);
+    auto [chunkSize, remainder] = bigNumDivide(rangeSize, (uint64_t)numThreads);
+    g_threadRanges.resize(numThreads);
 
     std::vector<uint64_t> currentStart = rangeStart;
-    for (int t = 0; t < numCPUs; t++) {
+    for (int t = 0; t < numThreads; t++) {
         auto currentEnd = bigNumAdd(currentStart, chunkSize);
         if (t < (int)remainder) {
             currentEnd = bigNumAdd(currentEnd, singleElementVector(1ULL));
@@ -619,7 +626,7 @@ int main(int argc, char *argv[]) {
     secp.Init();
 
     // PARRALEL COMPUTING BLOCK
-#pragma omp parallel num_threads(numCPUs) \
+#pragma omp parallel num_threads(numThreads) \
     shared(globalComparedCount, globalElapsedTime, mkeysPerSec, matchFound, \
            foundPrivateKeyHex, foundPublicKeyHex, lastStatusTime, lastSaveTime, g_progressSaveCount, \
            g_threadPrivateKeys)
@@ -842,7 +849,7 @@ int main(int argc, char *argv[]) {
                                                                                    localHashResults[j], targetHash160.data(), g_prefixLength);
 
                             // Print status block and partial match information
-printStatsBlock(numCPUs, targetHash160Hex, displayRange,
+printStatsBlock(numThreads, targetHash160Hex, displayRange,
                 mkeysPerSec, globalComparedCount,
                 globalElapsedTime, puzzle, randomMode, partialMatchInfo);
                         }
@@ -871,7 +878,7 @@ printStatsBlock(numCPUs, targetHash160Hex, displayRange,
                     mkeysPerSec = (double)globalComparedCount / globalElapsedTime / 1e6;
 
                     // Print status block without partial match information
-                    printStatsBlock(numCPUs, targetHash160Hex, displayRange,
+                    printStatsBlock(numThreads, targetHash160Hex, displayRange,
                                    mkeysPerSec, globalComparedCount,
                                    globalElapsedTime, puzzle, randomMode);
                     lastStatusTime = now;
