@@ -343,10 +343,8 @@ static void printStatsBlock(int numCPUs, const std::string &targetHash160Hex,
                             unsigned long long totalChecked, double elapsedTime,
                             int puzzle, bool randomMode, const std::string& partialMatchInfo = "") {
     std::lock_guard<std::mutex> lock(coutMutex);
-
-    // Move cursor to the top-left corner
-    std::cout << "\033[2J\033[1;1H\r";
-
+    
+    std::cout << "\033[1;1H\r";
     // Print the status block (lines 1-8)
     std::cout << "================= WORK IN PROGRESS =================\n";
     std::cout << "Puzzle        : " << puzzle << "\n"; // Print puzzle value
@@ -450,6 +448,8 @@ Int generateRandomPrivateKey(Int minKey, Int range, Xoshiro256plus &rng) {
 Int minKey, maxKey;
 
 int main(int argc, char *argv[]) {
+    // Move cursor to the top-left corner
+    std::cout << "\033[2J\033[1;1H\r";
     bool hash160Provided = false, rangeProvided = false, puzzleProvided = false;
     bool randomMode = false; // Default to sequential mode
     std::string targetHash160Hex;

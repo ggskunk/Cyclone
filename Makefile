@@ -6,7 +6,6 @@ CXXFLAGS = -m64 -std=c++17 -Ofast -mssse3 -Wall -Wextra \
            -Wno-write-strings -Wno-unused-variable -Wno-deprecated-copy \
            -Wno-unused-parameter -Wno-sign-compare -Wno-strict-aliasing \
            -Wno-unused-but-set-variable \
-           -march=native -mtune=native \
            -funroll-loops -ftree-vectorize -fstrict-aliasing -fno-semantic-interposition \
            -fvect-cost-model=unlimited -fno-trapping-math -fipa-ra -flto \
            -fassociative-math -fopenmp -mavx2 -mbmi2 -madx \
