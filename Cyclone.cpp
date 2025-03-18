@@ -348,7 +348,7 @@ static void printStatsBlock(int numCPUs, const std::string &targetHash160Hex,
     std::cout << "\033[1;1H\r";
     // Print the status block (lines 1-8)
     std::cout << "================= WORK IN PROGRESS =================\n";
-    std::cout << "Puzzle        : " << puzzle << "\n"; // Print puzzle value
+    std::cout << "Puzzle/Bits        : " << puzzle << "\n"; // Print puzzle value
     std::cout << "Mode          : " << (randomMode ? "Random" : "Sequential") << "\n"; // Add Mode
     std::cout << "Range         : " << rangeStr << "\n";
     std::cout << "Target Hash160: " << targetHash160Hex << "\n";
