@@ -17,7 +17,7 @@ while True:
     # Generate the first random number within the valid range
     first_number = random.randrange(LOWER_BOUND, UPPER_BOUND - BIT_GAP)
   
-    # Calculate the second number with a 30-bit gap
+    # Calculate the second number with a 26-bit gap
     second_number = first_number + BIT_GAP
   
     # Ensure the second number is within the upper bound
