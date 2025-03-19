@@ -1,3 +1,10 @@
+# Detect OS
+UNAME_S := $(shell uname -s)
+
+# Compiler settings based on OS
+ifeq ($(UNAME_S),Linux)
+# Linux settings
+
 # Compiler
 CXX = g++
 
@@ -8,7 +15,7 @@ CXXFLAGS = -m64 -std=c++17 -Ofast -mssse3 -Wall -Wextra \
            -Wno-unused-but-set-variable \
            -funroll-loops -ftree-vectorize -fstrict-aliasing -fno-semantic-interposition \
            -fvect-cost-model=unlimited -fno-trapping-math -fipa-ra -flto \
-           -fassociative-math -fopenmp -mavx2 -mbmi2 -madx \
+           -fassociative-math -fopenmp -mavx2 -mbmi2 -madx
 
 # Source files
 SRCS = Cyclone.cpp SECP256K1.cpp Int.cpp Timer.cpp IntGroup.cpp IntMod.cpp \
@@ -38,8 +45,63 @@ $(TARGET): $(OBJS)
 
 # Clean up build files
 clean:
-	echo "Cleaning..."
+	@echo "Cleaning..."
 	rm -f $(OBJS) $(TARGET)
 
 # Phony targets
 .PHONY: all clean fix_rdtsc
+
+else
+# Windows settings (MinGW-w64)
+# Compiler
+CXX = g++
+
+# Check if compiler is found
+CHECK_COMPILER := $(shell which $(CXX))
+
+# Add MSYS path if the compiler is not found
+ifeq ($(CHECK_COMPILER),)
+  $(info Compiler not found. Adding MSYS path to the environment...)
+  SHELL := powershell
+  PATH := C:\msys64\mingw64\bin;$(PATH)
+endif
+
+# Compiler flags (without LTO)
+CXXFLAGS = -m64 -std=c++17 -Ofast -mssse3 -Wall -Wextra \
+           -Wno-write-strings -Wno-unused-variable -Wno-deprecated-copy \
+           -Wno-unused-parameter -Wno-sign-compare -Wno-strict-aliasing \
+           -Wno-unused-but-set-variable -funroll-loops -ftree-vectorize \
+           -fstrict-aliasing -fno-semantic-interposition -fvect-cost-model=unlimited \
+           -fno-trapping-math -fipa-ra -fassociative-math -fopenmp \
+           -mavx2 -mbmi2 -madx
+
+# Source files
+SRCS = Cyclone.cpp SECP256K1.cpp Int.cpp Timer.cpp IntGroup.cpp IntMod.cpp \
+       Point.cpp ripemd160_avx2.cpp sha256_avx2.cpp Random.cpp  # Ensure Random.cpp is included
+
+# Object files
+OBJS = $(SRCS:.cpp=.o)
+
+# Target executable
+TARGET = Cyclone.exe
+
+# Default target
+all: $(TARGET)
+
+# Link the object files to create the executable
+$(TARGET): $(OBJS)
+	$(CXX) $(CXXFLAGS) -o $(TARGET) $(OBJS)
+	del /q $(OBJS)
+
+# Compile each source file into an object file
+%.o: %.cpp
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+# Clean up build files
+clean:
+	@echo Cleaning...
+	del /q $(OBJS) $(TARGET)
+
+# Phony targets
+.PHONY: all clean
+endif
