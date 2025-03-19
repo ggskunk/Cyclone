@@ -1,6 +1,9 @@
 # Detect OS
 UNAME_S := $(shell uname -s)
 
+# Enable static linking by default (change to 'no' to use dynamic linking)
+STATIC_LINKING = yes
+
 # Compiler settings based on OS
 ifeq ($(UNAME_S),Linux)
 # Linux settings
@@ -53,6 +56,7 @@ clean:
 
 else
 # Windows settings (MinGW-w64)
+
 # Compiler
 CXX = g++
 
@@ -74,6 +78,13 @@ CXXFLAGS = -m64 -std=c++17 -Ofast -mssse3 -Wall -Wextra \
            -fstrict-aliasing -fno-semantic-interposition -fvect-cost-model=unlimited \
            -fno-trapping-math -fipa-ra -fassociative-math -fopenmp \
            -mavx2 -mbmi2 -madx
+
+# Add -static flag if STATIC_LINKING is enabled
+ifeq ($(STATIC_LINKING), yes)
+    CXXFLAGS += -static
+else
+    $(info Dynamic linking will be used. Ensure required DLLs are distributed)
+endif
 
 # Source files
 SRCS = Cyclone.cpp SECP256K1.cpp Int.cpp Timer.cpp IntGroup.cpp IntMod.cpp \
