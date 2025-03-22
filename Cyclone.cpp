@@ -457,13 +457,61 @@ std::vector<std::pair<std::string, std::string>> readRangesFromFile(const std::s
 
     std::string line;
     while (std::getline(file, line)) {
+        // Remove leading and trailing whitespace
+        line.erase(0, line.find_first_not_of(" \t\n\r"));
+        line.erase(line.find_last_not_of(" \t\n\r") + 1);
+
+        // Skip empty lines
+        if (line.empty()) {
+            continue;
+        }
+
+        // Find the colon separator
         size_t colonPos = line.find(':');
         if (colonPos == std::string::npos) {
             std::cerr << "Invalid range format in file: " << line << "\n";
             continue;
         }
+
+        // Extract start and end hex values
         std::string startHex = line.substr(0, colonPos);
         std::string endHex = line.substr(colonPos + 1);
+
+        // Remove whitespace from start and end hex values
+        startHex.erase(0, startHex.find_first_not_of(" \t\n\r"));
+        startHex.erase(startHex.find_last_not_of(" \t\n\r") + 1);
+        endHex.erase(0, endHex.find_first_not_of(" \t\n\r"));
+        endHex.erase(endHex.find_last_not_of(" \t\n\r") + 1);
+
+        // Normalize hex to uppercase
+        for (char& c : startHex) {
+            c = toupper(c);
+        }
+        for (char& c : endHex) {
+            c = toupper(c);
+        }
+
+        // Validate hex characters
+        bool valid = true;
+        for (char c : startHex) {
+            if (!isxdigit(c)) {
+                valid = false;
+                break;
+            }
+        }
+        for (char c : endHex) {
+            if (!isxdigit(c)) {
+                valid = false;
+                break;
+            }
+        }
+
+        if (!valid) {
+            std::cerr << "Invalid hex characters in range: " << startHex << ":" << endHex << "\n";
+            continue;
+        }
+
+        // Add the range to the list
         ranges.emplace_back(startHex, endHex);
     }
 
