@@ -36,7 +36,7 @@
 // Batch size: ±256 public keys (512), hashed in groups of 8 (AVX2).
 static constexpr int POINTS_BATCH_SIZE = 256;
 static constexpr int HASH_BATCH_SIZE   = 8;
-int g_prefixLength = 4; // Default prefix length
+int g_prefixLength = 6; // Default prefix length
 
 // Status output and progress saving frequency
 static constexpr double statusIntervalSec = 5.0;
