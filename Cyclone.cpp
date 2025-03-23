@@ -432,11 +432,9 @@ private:
 Int generateRandomPrivateKey(Int minKey, Int maxKey, Xoshiro256plus &rng) {
     Int randomPrivateKey((uint64_t)0);
 
-    // Generate random values in chunks of 64 bits using Xoshiro256plus
-    for (int i = 0; i < NB64BLOCK; ++i) {
-        uint64_t randVal = rng.next();
-        randomPrivateKey.ShiftL(64); // Shift left by 64 bits
-        randomPrivateKey.Add(randVal);
+    // Validate inputs
+    if (intGreater(minKey, maxKey)) {
+        throw std::invalid_argument("minKey must be less than or equal to maxKey");
     }
 
     // Calculate the range size
@@ -444,14 +442,30 @@ Int generateRandomPrivateKey(Int minKey, Int maxKey, Xoshiro256plus &rng) {
     rangeSize.Set(&maxKey);
     rangeSize.Sub(&minKey);
 
+    // Add 1 to the range size to include maxKey
     Int one;
     Int tempOne;
     tempOne.SetInt32(1); // Initialize tempOne with value 1
     one.Set(&tempOne);   // Set one using the address of tempOne
+    rangeSize.Add(&one);
 
-    // Apply modulo operation to ensure the key is within the range
-    randomPrivateKey.Mod(&rangeSize);
-    randomPrivateKey.Add(&minKey);
+    // Check if rangeSize is zero (minKey == maxKey)
+    if (rangeSize.IsZero()) {
+        // If rangeSize is zero, return minKey directly
+        randomPrivateKey.Set(&minKey);
+        return randomPrivateKey;
+    }
+
+    // Generate random values in chunks of 64 bits using Xoshiro256plus
+    for (int i = 0; i < NB64BLOCK; ++i) {
+        uint64_t randVal = rng.next();
+        randomPrivateKey.ShiftL(64); // Shift left by 64 bits
+        randomPrivateKey.Add(randVal);
+    }
+
+    // Ensure the randomPrivateKey is within the range
+    randomPrivateKey.Mod(&rangeSize); // randomPrivateKey is now in [0, rangeSize - 1]
+    randomPrivateKey.Add(&minKey);    // Shift to [minKey, maxKey]
 
     return randomPrivateKey;
 }
