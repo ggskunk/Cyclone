@@ -429,7 +429,7 @@ private:
     std::array<uint64_t, 4> state;
 };
 
-Int generateRandomPrivateKey(Int minKey, Int rangeSizeInt, Xoshiro256plus &rng) {
+Int generateRandomPrivateKey(Int minKey, Int maxKey, Xoshiro256plus &rng) {
     Int randomPrivateKey((uint64_t)0);
 
     // Generate random values in chunks of 64 bits using Xoshiro256plus
@@ -439,10 +439,18 @@ Int generateRandomPrivateKey(Int minKey, Int rangeSizeInt, Xoshiro256plus &rng) 
         randomPrivateKey.Add(randVal);
     }
 
-    // Apply modulo operation to ensure the key is within the range
-    randomPrivateKey.Mod(&rangeSizeInt);
+    // Calculate the range size
+    Int rangeSize;
+    rangeSize.Set(&maxKey);
+    rangeSize.Sub(&minKey);
 
-    // Add minKey to ensure the key is within the correct range
+    // Add 1 to the range size to include maxKey
+    Int one;
+    one.SetInt32(1); // Create an Int with value 1
+    rangeSize.Add(&one);
+
+    // Apply modulo operation to ensure the key is within the range
+    randomPrivateKey.Mod(&rangeSize);
     randomPrivateKey.Add(&minKey);
 
     return randomPrivateKey;
@@ -710,11 +718,8 @@ int main(int argc, char *argv[]) {
 
         Int one;
         one.SetBase10(const_cast<char *>("1"));
-        Int minKey = one;
-        minKey.ShiftL(puzzle - 1); // Start of range: 2^(puzzle-1)
-        Int maxKey = one;
-        maxKey.ShiftL(puzzle); // End of range: 2^puzzle - 1
-        maxKey.Sub(&one);
+        Int minKey = hexToInt(rangeStartHex);
+        Int maxKey = hexToInt(rangeEndHex);
         Int rangeSizeInt = maxKey; // Renamed to avoid conflict
         rangeSizeInt.Sub(&minKey);
 
@@ -776,15 +781,12 @@ int main(int argc, char *argv[]) {
                 Int currentBatchKey;
                 if (randomMode) {
                     // Generate a random private key within the thread's range using Xoshiro256plus
-                    currentBatchKey = generateRandomPrivateKey(minKey, rangeSizeInt, rng);
+                    currentBatchKey = generateRandomPrivateKey(minKey, maxKey, rng);
                 } else {
                     // Sequential mode with stride
                     if (intGreater(privateKey, threadRangeEnd)) {
                         break;
                     }
-                    Int step;
-                    step.SetInt32(stride); // Advance by stride only
-                    privateKey.Add(&step);
                     currentBatchKey.Set(&privateKey);
                 }
 
@@ -995,7 +997,7 @@ int main(int argc, char *argv[]) {
                         if (!randomMode) {
                         // Only calculate progress in sequential mode
                         if (totalRangeLD > 0.0000L) {
-                        progressPercent = ((long double)globalComparedCount / totalRangeLD) * 100.0L;
+                        progressPercent = ((long double)globalComparedCount / totalRangeLD ) * 100.0L;
                         if (progressPercent > 100.0000L) {
                         progressPercent = 100.0000L; // Cap progress at 100%
                                 }
