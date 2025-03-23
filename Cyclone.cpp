@@ -429,7 +429,7 @@ private:
     std::array<uint64_t, 4> state;
 };
 
-Int generateRandomPrivateKey(Int minKey, Int range, Xoshiro256plus &rng) {
+Int generateRandomPrivateKey(Int minKey, Int rangeSizeInt, Xoshiro256plus &rng) {
     Int randomPrivateKey((uint64_t)0);
 
     // Generate random values in chunks of 64 bits using Xoshiro256plus
@@ -439,8 +439,10 @@ Int generateRandomPrivateKey(Int minKey, Int range, Xoshiro256plus &rng) {
         randomPrivateKey.Add(randVal);
     }
 
-    // Apply modulo operation and add minKey
-    randomPrivateKey.Mod(&range);
+    // Apply modulo operation to ensure the key is within the range
+    randomPrivateKey.Mod(&rangeSizeInt);
+
+    // Add minKey to ensure the key is within the correct range
     randomPrivateKey.Add(&minKey);
 
     return randomPrivateKey;
