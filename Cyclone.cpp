@@ -444,10 +444,10 @@ Int generateRandomPrivateKey(Int minKey, Int maxKey, Xoshiro256plus &rng) {
     rangeSize.Set(&maxKey);
     rangeSize.Sub(&minKey);
 
-    // Add 1 to the range size to include maxKey
     Int one;
-    one.SetInt32(1); // Create an Int with value 1
-    rangeSize.Add(&one);
+    Int tempOne;
+    tempOne.SetInt32(1); // Initialize tempOne with value 1
+    one.Set(&tempOne);   // Set one using the address of tempOne
 
     // Apply modulo operation to ensure the key is within the range
     randomPrivateKey.Mod(&rangeSize);
@@ -787,6 +787,9 @@ int main(int argc, char *argv[]) {
                     if (intGreater(privateKey, threadRangeEnd)) {
                         break;
                     }
+                    Int step;
+                    step.SetInt32(stride); // Advance by stride only
+                    privateKey.Add(&step);
                     currentBatchKey.Set(&privateKey);
                 }
 
@@ -997,7 +1000,7 @@ int main(int argc, char *argv[]) {
                         if (!randomMode) {
                         // Only calculate progress in sequential mode
                         if (totalRangeLD > 0.0000L) {
-                        progressPercent = ((long double)globalComparedCount / totalRangeLD ) * 100.0L;
+                        progressPercent = ((long double)globalComparedCount / totalRangeLD) * 100.0L;
                         if (progressPercent > 100.0000L) {
                         progressPercent = 100.0000L; // Cap progress at 100%
                                 }
