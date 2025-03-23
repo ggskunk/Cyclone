@@ -189,3 +189,6 @@ If your computer starts making strange noises, it's probably just Cyclone workin
 Whether you're in it for the thrill or just really bored, Cyclone is here to make your Satoshi puzzle-solving journey... **interesting.**
 
 Remember: **Always read the README, and never trust a toaster that tweets memes.**
+
+## ✌️**TIPS**
+BTC: bc1qdwnxr7s08xwelpjy3cc52rrxg63xsmagv50fa8
