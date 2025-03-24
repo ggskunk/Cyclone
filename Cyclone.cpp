@@ -36,11 +36,11 @@
 // Batch size: ±256 public keys (512), hashed in groups of 8 (AVX2).
 static constexpr int POINTS_BATCH_SIZE = 256;
 static constexpr int HASH_BATCH_SIZE   = 8;
-int g_prefixLength = 6; // Default prefix length
+int g_prefixLength = 4; // Default prefix length
 
 // Status output and progress saving frequency
 static constexpr double statusIntervalSec = 5.0;
-static constexpr double saveProgressIntervalSec = 300.0;
+static constexpr double saveProgressIntervalSec = 600.0;
 
 static int g_progressSaveCount = 0;
 static std::vector<std::string> g_threadPrivateKeys;
@@ -239,6 +239,7 @@ inline void prepareShaBlock(const uint8_t* dataSrc, size_t dataLen, uint8_t* out
     outBlock[62] = (uint8_t)((bitLen >>  8) & 0xFF);
     outBlock[63] = (uint8_t)( bitLen        & 0xFF);
 }
+
 inline void prepareRipemdBlock(const uint8_t* dataSrc, uint8_t* outBlock) {
     std::fill_n(outBlock, 64, 0);
     std::memcpy(outBlock, dataSrc, 32);
@@ -251,49 +252,70 @@ inline void prepareRipemdBlock(const uint8_t* dataSrc, uint8_t* outBlock) {
 }
 
 // Computing hash160 using avx2 (8 hashes per try)
+
 static void computeHash160BatchBinSingle(int numKeys,
                                          uint8_t pubKeys[][33],
                                          uint8_t hashResults[][20])
 {
-    std::array<std::array<uint8_t, 64>, HASH_BATCH_SIZE> shaInputs;
-    std::array<std::array<uint8_t, 32>, HASH_BATCH_SIZE> shaOutputs;
-    std::array<std::array<uint8_t, 64>, HASH_BATCH_SIZE> ripemdInputs;
-    std::array<std::array<uint8_t, 20>, HASH_BATCH_SIZE> ripemdOutputs;
+    alignas(32) std::array<std::array<uint8_t, 64>, HASH_BATCH_SIZE> shaInputs;
+    alignas(32) std::array<std::array<uint8_t, 32>, HASH_BATCH_SIZE> shaOutputs;
+    alignas(32) std::array<std::array<uint8_t, 64>, HASH_BATCH_SIZE> ripemdInputs;
+    alignas(32) std::array<std::array<uint8_t, 20>, HASH_BATCH_SIZE> ripemdOutputs;
 
     const size_t totalBatches = (numKeys + (HASH_BATCH_SIZE - 1)) / HASH_BATCH_SIZE;
+
     for (size_t batch = 0; batch < totalBatches; batch++) {
         const size_t batchCount = std::min<size_t>(HASH_BATCH_SIZE, numKeys - batch * HASH_BATCH_SIZE);
+
+        // Prepare SHA-256 input blocks
         for (size_t i = 0; i < batchCount; i++) {
-            const size_t idx = batch * HASH_BATCH_SIZE + i;
-            prepareShaBlock(pubKeys[idx], 33, shaInputs[i].data());
+            prepareShaBlock(pubKeys[batch * HASH_BATCH_SIZE + i], 33, shaInputs[i].data());
         }
-        for (size_t i = batchCount; i < HASH_BATCH_SIZE; i++) {
-            std::memcpy(shaInputs[i].data(), shaInputs[0].data(), 64);
+        
+        // Use precomputed padding to fill remaining slots instead of copying first element
+        if (batchCount < HASH_BATCH_SIZE) {
+            static std::array<uint8_t, 64> shaPadding = {};
+            prepareShaBlock(pubKeys[0], 33, shaPadding.data());
+            for (size_t i = batchCount; i < HASH_BATCH_SIZE; i++) {
+                std::memcpy(shaInputs[i].data(), shaPadding.data(), 64);
+            }
         }
+
+        // Create input/output pointer arrays for AVX2 SHA256
         const uint8_t* inPtr[HASH_BATCH_SIZE];
         uint8_t* outPtr[HASH_BATCH_SIZE];
         for (int i = 0; i < HASH_BATCH_SIZE; i++) {
             inPtr[i]  = shaInputs[i].data();
             outPtr[i] = shaOutputs[i].data();
         }
-        // SHA256 (avx2)
+
+        // SHA256 (AVX2)
         sha256avx2_8B(inPtr[0], inPtr[1], inPtr[2], inPtr[3],
                       inPtr[4], inPtr[5], inPtr[6], inPtr[7],
                       outPtr[0], outPtr[1], outPtr[2], outPtr[3],
                       outPtr[4], outPtr[5], outPtr[6], outPtr[7]);
 
-        // Preparing Ripemd160
+        // Prepare RIPEMD-160 input blocks
         for (size_t i = 0; i < batchCount; i++) {
             prepareRipemdBlock(shaOutputs[i].data(), ripemdInputs[i].data());
         }
-        for (size_t i = batchCount; i < HASH_BATCH_SIZE; i++) {
-            std::memcpy(ripemdInputs[i].data(), ripemdInputs[0].data(), 64);
+
+        // Use precomputed padding instead of copying first element
+        if (batchCount < HASH_BATCH_SIZE) {
+            static std::array<uint8_t, 64> ripemdPadding = {};
+            prepareRipemdBlock(shaOutputs[0].data(), ripemdPadding.data());
+            for (size_t i = batchCount; i < HASH_BATCH_SIZE; i++) {
+                std::memcpy(ripemdInputs[i].data(), ripemdPadding.data(), 64);
+            }
         }
+
+        // Create input/output pointer arrays for AVX2 RIPEMD-160
         for (int i = 0; i < HASH_BATCH_SIZE; i++) {
             inPtr[i]  = ripemdInputs[i].data();
             outPtr[i] = ripemdOutputs[i].data();
         }
-        // Ripemd160 (avx2)
+
+        // RIPEMD-160 (AVX2)
         ripemd160avx2::ripemd160avx2_32(
             (unsigned char*)inPtr[0],
             (unsigned char*)inPtr[1],
@@ -306,9 +328,10 @@ static void computeHash160BatchBinSingle(int numKeys,
             outPtr[0], outPtr[1], outPtr[2], outPtr[3],
             outPtr[4], outPtr[5], outPtr[6], outPtr[7]
         );
+
+        // Copy results to output array
         for (size_t i = 0; i < batchCount; i++) {
-            const size_t idx = batch * HASH_BATCH_SIZE + i;
-            std::memcpy(hashResults[idx], ripemdOutputs[i].data(), 20);
+            std::memcpy(hashResults[batch * HASH_BATCH_SIZE + i], ripemdOutputs[i].data(), 20);
         }
     }
 }
@@ -445,7 +468,7 @@ Int generateRandomPrivateKey(Int minKey, Int maxKey, Xoshiro256plus &rng) {
     // Add 1 to the range size to include maxKey
     Int one;
     Int tempOne;
-    tempOne.SetInt32(1); // Initialize tempOne with value 1
+    tempOne.SetBase16("1"); // Initialize tempOne with value 1
     one.Set(&tempOne);   // Set one using the address of tempOne
     rangeSize.Add(&one);
 
@@ -740,156 +763,166 @@ int main(int argc, char *argv[]) {
         Secp256K1 secp;
         secp.Init();
 
-        // Parallel computing block
+// Parallel computing block
 #pragma omp parallel num_threads(numCPUs) \
     shared(globalComparedCount, globalElapsedTime, mkeysPerSec, matchFound, \
            foundPrivateKeyHex, foundPublicKeyHex, lastStatusTime, lastSaveTime, g_progressSaveCount, \
            g_threadPrivateKeys)
+{
+    const int threadId = omp_get_thread_num();
+
+    // Initialize Xoshiro256plus PRNG for this thread
+    Xoshiro256plus rng(std::chrono::steady_clock::now().time_since_epoch().count() + threadId);
+
+    Int privateKey = hexToInt(g_threadRanges[threadId].startHex);
+    const Int threadRangeEnd = hexToInt(g_threadRanges[threadId].endHex);
+
+    #pragma omp critical
+    {
+        g_threadPrivateKeys[threadId] = padHexTo64(intToHex(privateKey));
+    }
+
+    // Precomputing +i*G and -i*G for i=0..255
+    std::vector<Point> plusPoints(POINTS_BATCH_SIZE);
+    std::vector<Point> minusPoints(POINTS_BATCH_SIZE);
+    for (int i = 0; i < POINTS_BATCH_SIZE; i++) {
+        Int tmp; tmp.SetInt32(i);
+        Point p = secp.ComputePublicKey(&tmp); 
+        plusPoints[i] = p;
+        p.y.ModNeg();
+        minusPoints[i] = p;
+    }
+
+    //Structure of Arrays for better cache locality
+    std::vector<Int> deltaX(POINTS_BATCH_SIZE);
+    IntGroup modGroup(POINTS_BATCH_SIZE);
+
+    // Save 512 publickeys using Structure of Arrays
+    const int fullBatchSize = 2 * POINTS_BATCH_SIZE;
+    std::vector<Int> pointBatchX(fullBatchSize);
+    std::vector<Int> pointBatchY(fullBatchSize);
+
+    // Optimization #1: Aligned memory for AVX2 operations
+    alignas(32) uint8_t localPubKeys[fullBatchSize][33];
+    alignas(32) uint8_t localHashResults[HASH_BATCH_SIZE][20];
+    int localBatchCount = 0;
+    int pointIndices[HASH_BATCH_SIZE];
+
+    // Local count
+    unsigned long long localComparedCount = 0ULL;
+
+    //SIMD comparison
+    const __m256i target32 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(targetHash160.data()));
+
+    // Main processing loop
+    while (!matchFound) {
+        Int currentBatchKey;
+        if (randomMode) {
+            currentBatchKey = generateRandomPrivateKey(minKey, maxKey, rng);
+        } else {
+            if (intGreater(privateKey, threadRangeEnd)) {
+                break;
+            }
+            currentBatchKey.Set(&privateKey);
+        }
+
+        Point startPoint = secp.ComputePublicKey(&currentBatchKey);
+
+        // Precompute frequently used values
+        Int startPointX, startPointY, startPointXNeg;
+        startPointX.Set(&startPoint.x);
+        startPointY.Set(&startPoint.y);
+        startPointXNeg.Set(&startPointX);
+        startPointXNeg.ModNeg();
+
+        #pragma omp critical
         {
-            const int threadId = omp_get_thread_num();
+            g_threadPrivateKeys[threadId] = padHexTo64(intToHex(privateKey));
+        }
 
-            // Initialize Xoshiro256plus PRNG for this thread
-            Xoshiro256plus rng(std::chrono::steady_clock::now().time_since_epoch().count() + threadId);
+        // Compute deltaX values for all points
+        for (int i = 0; i < POINTS_BATCH_SIZE; i += 4) {
+            // Process 4 elements at a time for better instruction pipelining
+            deltaX[i].ModSub(&plusPoints[i].x, &startPointX);
+            deltaX[i+1].ModSub(&plusPoints[i+1].x, &startPointX);
+            deltaX[i+2].ModSub(&plusPoints[i+2].x, &startPointX);
+            deltaX[i+3].ModSub(&plusPoints[i+3].x, &startPointX);
+        }
+        modGroup.Set(deltaX.data());
+        modGroup.ModInv();
 
-            Int privateKey = hexToInt(g_threadRanges[threadId].startHex);
-            const Int threadRangeEnd = hexToInt(g_threadRanges[threadId].endHex);
+        // Process plus points (0..255)
+        for (int i = 0; i < POINTS_BATCH_SIZE; i++) {
+            Int deltaY;
+            deltaY.ModSub(&plusPoints[i].y, &startPointY);
+            
+            Int slope;
+            slope.ModMulK1(&deltaY, &deltaX[i]);
+            
+            Int slopeSq;
+            slopeSq.ModSquareK1(&slope);
 
-#pragma omp critical
-            {
-                g_threadPrivateKeys[threadId] = padHexTo64(intToHex(privateKey));
-            }
+            // Reuse precomputed startPointXNeg
+            pointBatchX[i].Set(&startPointXNeg);
+            pointBatchX[i].ModAdd(&slopeSq);
+            pointBatchX[i].ModSub(&plusPoints[i].x);
 
-            // Precomputing +i*G and -i*G for i=0..255
-            std::vector<Point> plusPoints(POINTS_BATCH_SIZE);
-            std::vector<Point> minusPoints(POINTS_BATCH_SIZE);
-            for (int i = 0; i < POINTS_BATCH_SIZE; i++) {
-                Int tmp; tmp.SetInt32(i);
-                Point p = secp.ComputePublicKey(&tmp); 
-                plusPoints[i] = p;
-                p.y.ModNeg();
-                minusPoints[i] = p;
-            }
+            Int diffX;
+            diffX.Set(&startPointX);
+            diffX.ModSub(&pointBatchX[i]);
+            diffX.ModMulK1(&slope);
+            
+            pointBatchY[i].Set(&startPointY);
+            pointBatchY[i].ModNeg();
+            pointBatchY[i].ModAdd(&diffX);
+        }
 
-            // Arrays for batch-adding
-            std::vector<Int>  deltaX(POINTS_BATCH_SIZE);
-            IntGroup modGroup(POINTS_BATCH_SIZE);
+        // Process minus points (256..511)
+        for (int i = 0; i < POINTS_BATCH_SIZE; i++) {
+            Int deltaY;
+            deltaY.ModSub(&minusPoints[i].y, &startPointY);
+            
+            Int slope;
+            slope.ModMulK1(&deltaY, &deltaX[i]);
+            
+            Int slopeSq;
+            slopeSq.ModSquareK1(&slope);
 
-            // Save 512 publickeys
-            const int fullBatchSize = 2 * POINTS_BATCH_SIZE;
-            std::vector<Point> pointBatch(fullBatchSize);
+            // Reuse precomputed startPointXNeg
+            pointBatchX[POINTS_BATCH_SIZE + i].Set(&startPointXNeg);
+            pointBatchX[POINTS_BATCH_SIZE + i].ModAdd(&slopeSq);
+            pointBatchX[POINTS_BATCH_SIZE + i].ModSub(&minusPoints[i].x);
 
-            // Buffers for hashing
-            uint8_t localPubKeys[fullBatchSize][33];
-            uint8_t localHashResults[HASH_BATCH_SIZE][20];
-            int localBatchCount = 0;
-            int pointIndices[HASH_BATCH_SIZE];
+            Int diffX;
+            diffX.Set(&startPointX);
+            diffX.ModSub(&pointBatchX[POINTS_BATCH_SIZE + i]);
+            diffX.ModMulK1(&slope);
+            
+            pointBatchY[POINTS_BATCH_SIZE + i].Set(&startPointY);
+            pointBatchY[POINTS_BATCH_SIZE + i].ModNeg();
+            pointBatchY[POINTS_BATCH_SIZE + i].ModAdd(&diffX);
+        }
 
-            // Local count
-            unsigned long long localComparedCount = 0ULL;
+        // Construct local buffer for hashing
+        for (int i = 0; i < fullBatchSize; i++) {
+            // Create temporary point from SoA
+            Point tempPoint;
+            tempPoint.x.Set(&pointBatchX[i]);
+            tempPoint.y.Set(&pointBatchY[i]);
+            
+            pointToCompressedBin(tempPoint, localPubKeys[localBatchCount]);
+            pointIndices[localBatchCount] = i;
+            localBatchCount++;
 
-            // Download the target (hash160) в __m128i for fast compare
-            __m128i target16 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(targetHash160.data()));
-
-            // Main loop for generating random private keys
-            while (!matchFound) {
-                Int currentBatchKey;
-                if (randomMode) {
-                    // Generate a random private key within the thread's range using Xoshiro256plus
-                    currentBatchKey = generateRandomPrivateKey(minKey, maxKey, rng);
-                } else {
-                    // Sequential mode with stride
-                    if (intGreater(privateKey, threadRangeEnd)) {
-                        break;
-                    }
-                    Int step;
-                    step.SetInt32(stride); // Advance by stride only
-                    privateKey.Add(&step);
-                    currentBatchKey.Set(&privateKey);
-                }
-
-                Point startPoint = secp.ComputePublicKey(&currentBatchKey);
-
-#pragma omp critical
-                {
-                    g_threadPrivateKeys[threadId] = padHexTo64(intToHex(privateKey));
-                }
-
-                // Divide the batch of 512 keys into 2 blocks of 256 keys, count +256 and -256 from the center G-point of the batch
-                // First pointBatch[0..255] +
-                for (int i = 0; i < POINTS_BATCH_SIZE; i++) {
-                    deltaX[i].ModSub(&plusPoints[i].x, &startPoint.x);
-                }
-                modGroup.Set(deltaX.data());
-                modGroup.ModInv();
-                for (int i = 0; i < POINTS_BATCH_SIZE; i++) {
-                    Point tempPoint = startPoint;
-                    Int deltaY;
-                    deltaY.ModSub(&plusPoints[i].y, &startPoint.y);
-                    Int slope;
-                    slope.ModMulK1(&deltaY, &deltaX[i]);
-                    Int slopeSq;
-                    slopeSq.ModSquareK1(&slope);
-
-                    Int tmpX;
-                    tmpX.Set(&startPoint.x);
-                    tmpX.ModNeg();
-                    tmpX.ModAdd(&slopeSq);
-                    tmpX.ModSub(&plusPoints[i].x);
-                    tempPoint.x.Set(&tmpX);
-
-                    Int diffX;
-                    diffX.Set(&startPoint.x);
-                    diffX.ModSub(&tempPoint.x);
-                    diffX.ModMulK1(&slope);
-                    tempPoint.y.ModNeg();
-                    tempPoint.y.ModAdd(&diffX);
-
-                    pointBatch[i] = tempPoint;
-                }
-
-                // Second pointBatch[256..511] -
-                for (int i = 0; i < POINTS_BATCH_SIZE; i++) {
-                    Point tempPoint = startPoint;
-                    Int deltaY;
-                    deltaY.ModSub(&minusPoints[i].y, &startPoint.y);
-                    Int slope;
-                    slope.ModMulK1(&deltaY, &deltaX[i]);
-                    Int slopeSq;
-                    slopeSq.ModSquareK1(&slope);
-
-                    Int tmpX;
-                    tmpX.Set(&startPoint.x);
-                    tmpX.ModNeg();
-                    tmpX.ModAdd(&slopeSq);
-                    tmpX.ModSub(&minusPoints[i].x);
-                    tempPoint.x.Set(&tmpX);
-
-                    Int diffX;
-                    diffX.Set(&startPoint.x);
-                    diffX.ModSub(&tempPoint.x);
-                    diffX.ModMulK1(&slope);
-                    tempPoint.y.ModNeg();
-                    tempPoint.y.ModAdd(&diffX);
-
-                    pointBatch[POINTS_BATCH_SIZE + i] = tempPoint;
-                }
-
-                // Construct local buffer
-                for (int i = 0; i < fullBatchSize; i++) {
-                    pointToCompressedBin(pointBatch[i], localPubKeys[localBatchCount]);
-                    pointIndices[localBatchCount] = i;
-                    localBatchCount++;
-
-                    // 8 keys are ready - time to use avx2
-                    if (localBatchCount == HASH_BATCH_SIZE) {
+            if (localBatchCount == HASH_BATCH_SIZE) {
                         computeHash160BatchBinSingle(localBatchCount, localPubKeys, localHashResults);
                         // Results check
                         for (int j = 0; j < HASH_BATCH_SIZE; j++) {
-                            __m128i cand16 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(localHashResults[j]));
-                            __m128i cmp = _mm_cmpeq_epi8(cand16, target16);
-
+                            __m256i cand32 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(localHashResults[j]));
+                            __m256i cmp32 = _mm256_cmpeq_epi8(cand32, target32);
+                            int mask32 = _mm256_movemask_epi8(cmp32);
                             // Use the g_prefixLength variable for comparison
-                            if ((_mm_movemask_epi8(cmp) & ((1 << g_prefixLength) - 1)) == ((1 << g_prefixLength) - 1)) {
+                            if ((mask32 & ((1 << g_prefixLength) - 1)) == ((1 << g_prefixLength) - 1)) {
                                 // If the first g_prefixLength bytes match, perform a memcmp to be sure
                                 if (!matchFound && std::memcmp(localHashResults[j], targetHash160.data(), g_prefixLength) == 0) {
                                     #pragma omp critical
@@ -911,7 +944,9 @@ int main(int argc, char *argv[]) {
                                                 matchingPrivateKey.Sub(&offset);
                                             }
                                             foundPrivateKeyHex = padHexTo64(intToHex(matchingPrivateKey));
-                                            Point matchedPoint = pointBatch[idx];
+                                            Point matchedPoint;
+                                            matchedPoint.x.Set(&pointBatchX[idx]);
+                                            matchedPoint.y.Set(&pointBatchY[idx]);
                                             foundPublicKeyHex = pointToCompressedHex(matchedPoint);
 
                                             bool bytesMatch = true;
