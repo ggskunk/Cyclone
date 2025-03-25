@@ -14,13 +14,6 @@
 #include <utility>
 #include <mutex>
 #include <cmath>
-#ifdef _WIN32
-#include <windows.h>
-#endif
-
-#ifdef _WIN32
-  SetConsoleOutputCP(65001);  // UTF-8
-#endif
 
 // Adding program modules
 #include "sha256_avx2.h"
@@ -354,7 +347,7 @@ static void printUsage(const char *programName) {
 
 static std::string formatElapsedTime(double seconds, bool randomMode = false) {
     if (randomMode) {
-        return "∞"; 
+        return "N/A"; 
     }
 
     // Format elapsed time as HH:MM:SS
@@ -398,7 +391,7 @@ static void printStatsBlock(int numCPUs, const std::string &targetHash160Hex,
     std::cout << "Total Checked : " << totalChecked << "\n";
     std::cout << "Elapsed Time  : " << formatElapsedTime(elapsedTime, randomMode) << "\n"; 
     std::cout << "Range         : " << rangeStr << "\n";
-    std::cout << "Progress      : " << (randomMode ? "∞" : std::to_string(progressPercent) + " %") << "\n";
+    std::cout << "Progress      : " << (randomMode ? " N/A" : std::to_string(progressPercent) + " %") << "\n";
     std::cout << "Progress Save : " << progressSaves << "\n";
     std::cout << "Stride        : " << stride << "\n"; // Add Stride
     std::cout.flush();
