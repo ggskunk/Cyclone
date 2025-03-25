@@ -391,7 +391,7 @@ static void printStatsBlock(int numCPUs, const std::string &targetHash160Hex,
     std::cout << "Total Checked : " << totalChecked << "\n";
     std::cout << "Elapsed Time  : " << formatElapsedTime(elapsedTime, randomMode) << "\n"; 
     std::cout << "Range         : " << rangeStr << "\n";
-    std::cout << "Progress      : " << (randomMode ? " N/A" : std::to_string(progressPercent) + " %") << "\n";
+    std::cout << "Progress      : " << (randomMode ? "N/A" : std::to_string(progressPercent) + " %") << "\n";
     std::cout << "Progress Save : " << progressSaves << "\n";
     std::cout << "Stride        : " << stride << "\n"; // Add Stride
     std::cout.flush();
