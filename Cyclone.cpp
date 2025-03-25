@@ -14,6 +14,13 @@
 #include <utility>
 #include <mutex>
 #include <cmath>
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
+#ifdef _WIN32
+  SetConsoleOutputCP(65001);  // UTF-8
+#endif
 
 // Adding program modules
 #include "sha256_avx2.h"
@@ -252,7 +259,6 @@ inline void prepareRipemdBlock(const uint8_t* dataSrc, uint8_t* outBlock) {
 }
 
 // Computing hash160 using avx2 (8 hashes per try)
-
 static void computeHash160BatchBinSingle(int numKeys,
                                          uint8_t pubKeys[][33],
                                          uint8_t hashResults[][20])
@@ -802,7 +808,7 @@ int main(int argc, char *argv[]) {
     std::vector<Int> pointBatchX(fullBatchSize);
     std::vector<Int> pointBatchY(fullBatchSize);
 
-    // Optimization #1: Aligned memory for AVX2 operations
+    //Aligned memory for AVX2 operations
     alignas(32) uint8_t localPubKeys[fullBatchSize][33];
     alignas(32) uint8_t localHashResults[HASH_BATCH_SIZE][20];
     int localBatchCount = 0;
