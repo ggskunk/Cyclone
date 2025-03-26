@@ -985,8 +985,7 @@ Int minKey, maxKey;
                             __m256i cmp32 = _mm256_cmpeq_epi8(cand32, target32);
                             int mask32 = _mm256_movemask_epi8(cmp32);
                             // Use the g_prefixLength variable for comparison
-                            uint16_t bitmask = (0xFFFF >> (16 - 4 * g_prefixLength)) << (16 - 4 * g_prefixLength);
-                            if ((mask32 & bitmask) == bitmask) {
+                            if ((mask32 & ((1 << g_prefixLength) - 1)) == ((1 << g_prefixLength) - 1)) {
                                 // If the first g_prefixLength bytes match, perform a memcmp to be sure
                                 if (!matchFound && std::memcmp(localHashResults[j], targetHash160.data(), g_prefixLength) == 0) {
                                     #pragma omp critical
