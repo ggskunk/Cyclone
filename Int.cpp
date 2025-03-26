@@ -1,3 +1,19 @@
+/*
+ * This file is part of the BSGS distribution (https://github.com/JeanLucPons/VanitySearch).
+ * Copyright (c) 2020 Jean Luc PONS.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, version 3.
+ *
+ * This program is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+ * General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <http://www.gnu.org/licenses/>.
+*/
 
 #include "Int.h"
 #include "IntGroup.h"
@@ -301,17 +317,17 @@ void Int::MatrixVecMul(Int* u,Int* v,int64_t _11,int64_t _12,int64_t _21,int64_t
   }
 
   // Compute product
-  t1.bits64[0] = _umul128(du1->bits64[0],_11,&h1); carry1 = h1;
-  t2.bits64[0] = _umul128(dv1->bits64[0],_12,&h2); carry2 = h2;
-  t3.bits64[0] = _umul128(du2->bits64[0],_21,&h3); carry3 = h3;
-  t4.bits64[0] = _umul128(dv2->bits64[0],_22,&h4); carry4 = h4;
+  t1.bits64[0] = _umul128_local(du1->bits64[0],_11,&h1); carry1 = h1;
+  t2.bits64[0] = _umul128_local(dv1->bits64[0],_12,&h2); carry2 = h2;
+  t3.bits64[0] = _umul128_local(du2->bits64[0],_21,&h3); carry3 = h3;
+  t4.bits64[0] = _umul128_local(dv2->bits64[0],_22,&h4); carry4 = h4;
   c1 = 0; c2 = 0; c3 = 0; c4 = 0;
 
   for(int i = 1; i <= len; i++) {
-    c1 = _addcarry_u64(c1,_umul128(du1->bits64[i],_11,&h1),carry1,t1.bits64 + i); carry1 = h1;
-    c2 = _addcarry_u64(c2,_umul128(dv1->bits64[i],_12,&h2),carry2,t2.bits64 + i); carry2 = h2;
-    c3 = _addcarry_u64(c3,_umul128(du2->bits64[i],_21,&h3),carry3,t3.bits64 + i); carry3 = h3;
-    c4 = _addcarry_u64(c4,_umul128(dv2->bits64[i],_22,&h4),carry4,t4.bits64 + i); carry4 = h4;
+    c1 = _addcarry_u64(c1,_umul128_local(du1->bits64[i],_11,&h1),carry1,t1.bits64 + i); carry1 = h1;
+    c2 = _addcarry_u64(c2,_umul128_local(dv1->bits64[i],_12,&h2),carry2,t2.bits64 + i); carry2 = h2;
+    c3 = _addcarry_u64(c3,_umul128_local(du2->bits64[i],_21,&h3),carry3,t3.bits64 + i); carry3 = h3;
+    c4 = _addcarry_u64(c4,_umul128_local(dv2->bits64[i],_22,&h4),carry4,t4.bits64 + i); carry4 = h4;
   }
 
   // Add
@@ -842,11 +858,11 @@ void Int::Mult(Int *a,Int *b) {
   uint64_t carryh = 0;
   uint64_t carryl = 0;
 
-  bits64[0] = _umul128(a->bits64[0], b->bits64[0], &pr);
+  bits64[0] = _umul128_local(a->bits64[0], b->bits64[0], &pr);
 
   for (int i = 1; i < NB64BLOCK; i++) {
     for (int j = 0; j <= i; j++) {
-      c = _addcarry_u64(c, _umul128(a->bits64[j], b->bits64[i - j], &h), pr, &pr);
+      c = _addcarry_u64(c, _umul128_local(a->bits64[j], b->bits64[i - j], &h), pr, &pr);
       c = _addcarry_u64(c, carryl, h, &carryl);
       c = _addcarry_u64(c, carryh, 0, &carryh);
     }
@@ -1067,12 +1083,12 @@ void Int::Div(Int *a,Int *mod) {
       uint64_t nl = rem.bits64[sb-j-1];
 
       uint64_t estProH;
-      uint64_t estProL = _umul128(_dl,qhat,&estProH);
+      uint64_t estProL = _umul128_local(_dl,qhat,&estProH);
       if( isStrictGreater128(estProH,estProL,qrem,nl) ) {
         qhat--;
         qrem += _dh;
         if (qrem >= _dh) {
-          estProL = _umul128(_dl,qhat,&estProH);
+          estProL = _umul128_local(_dl,qhat,&estProH);
           if(isStrictGreater128(estProH,estProL,qrem,nl))
             qhat--;
         }

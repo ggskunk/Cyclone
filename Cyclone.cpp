@@ -15,6 +15,10 @@
 #include <mutex>
 #include <cmath>
 
+#ifdef _WIN32
+    #include <windows.h>
+#endif
+
 // Adding program modules
 #include "sha256_avx2.h"
 #include "ripemd160_avx2.h"
@@ -52,8 +56,7 @@ static void clearTerminal() {
 }
 
 //------------------------------------------------------------------------------
-void saveProgressToFile(const std::string &progressStr)
-{
+void saveProgressToFile(const std::string &progressStr) {
     std::ofstream ofs("progress.txt", std::ios::app);
     if (ofs) {
         ofs << progressStr << "\n";
@@ -63,7 +66,6 @@ void saveProgressToFile(const std::string &progressStr)
 }
 
 //------------------------------------------------------------------------------
-// Converts a HEX string into a large number (a vector of 64-bit words, little-endian).
 std::vector<uint64_t> hexToBigNum(const std::string& hex) {
     std::vector<uint64_t> bigNum;
     const size_t len = hex.size();
@@ -77,7 +79,6 @@ std::vector<uint64_t> hexToBigNum(const std::string& hex) {
     return bigNum;
 }
 
-// Reverse conversion to a HEX string (with correct leading zeros within blocks).
 std::string bigNumToHex(const std::vector<uint64_t>& num) {
     std::ostringstream oss;
     for (auto it = num.rbegin(); it != num.rend(); ++it) {
@@ -113,7 +114,7 @@ std::vector<uint64_t> bigNumSubtract(const std::vector<uint64_t>& a, const std::
     for (size_t i = 0; i < b.size(); ++i) {
         uint64_t subtrahend = b[i];
         if (diff[i] < subtrahend + borrow) {
-            diff[i] = diff[i] + (~0ULL) - subtrahend - borrow + 1ULL; // eqv diff[i] = diff[i] - subtrahend - borrow
+            diff[i] = diff[i] + (~0ULL) - subtrahend - borrow + 1ULL;
             borrow = 1ULL;
         } else {
             diff[i] -= (subtrahend + borrow);
@@ -129,7 +130,6 @@ std::vector<uint64_t> bigNumSubtract(const std::vector<uint64_t>& a, const std::
             borrow = 0ULL;
         }
     }
-    // delete leading zeros
     while (!diff.empty() && diff.back() == 0ULL)
         diff.pop_back();
     return diff;
@@ -164,6 +164,8 @@ long double hexStrToLongDouble(const std::string &hex) {
     return result;
 }
 
+//------------------------------------------------------------------------------
+
 // Function to calculate the puzzle size based on the range
 int calculatePuzzleSize(const std::string& startHex, const std::string& endHex) {
     // Convert the hexadecimal strings to big numbers
@@ -185,6 +187,7 @@ int calculatePuzzleSize(const std::string& startHex, const std::string& endHex) 
 static inline std::string padHexTo64(const std::string &hex) {
     return (hex.size() >= 64) ? hex : std::string(64 - hex.size(), '0') + hex;
 }
+
 static inline Int hexToInt(const std::string &hex) {
     Int number;
     char buf[65] = {0};
@@ -192,17 +195,20 @@ static inline Int hexToInt(const std::string &hex) {
     number.SetBase16(buf);
     return number;
 }
+
 static inline std::string intToHex(const Int &value) {
     Int temp;
     temp.Set((Int*)&value);
     return temp.GetBase16();
 }
+
 static inline bool intGreater(const Int &a, const Int &b) {
     std::string ha = ((Int&)a).GetBase16();
     std::string hb = ((Int&)b).GetBase16();
     if (ha.size() != hb.size()) return (ha.size() > hb.size());
     return (ha > hb);
 }
+
 static inline bool isEven(const Int &number) {
     return ((Int&)number).IsEven();
 }
@@ -219,6 +225,7 @@ static inline std::string intXToHex64(const Int &x) {
 static inline std::string pointToCompressedHex(const Point &point) {
     return (isEven(point.y) ? "02" : "03") + intXToHex64(point.x);
 }
+
 static inline void pointToCompressedBin(const Point &point, uint8_t outCompressed[33]) {
     outCompressed[0] = isEven(point.y) ? 0x02 : 0x03;
     Int temp;
@@ -921,7 +928,8 @@ int main(int argc, char *argv[]) {
                             __m256i cmp32 = _mm256_cmpeq_epi8(cand32, target32);
                             int mask32 = _mm256_movemask_epi8(cmp32);
                             // Use the g_prefixLength variable for comparison
-                            if ((mask32 & ((1 << g_prefixLength) - 1)) == ((1 << g_prefixLength) - 1)) {
+                            uint16_t bitmask = (0xFFFF >> (16 - 4 * g_prefixLength)) << (16 - 4 * g_prefixLength);
+                            if ((mask32 & bitmask) == bitmask) {
                                 // If the first g_prefixLength bytes match, perform a memcmp to be sure
                                 if (!matchFound && std::memcmp(localHashResults[j], targetHash160.data(), g_prefixLength) == 0) {
                                     #pragma omp critical
