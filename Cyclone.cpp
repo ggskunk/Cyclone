@@ -17,7 +17,6 @@
 
 #ifdef _WIN32
     #include <windows.h>
-    #include <intrin.h>
 #endif
 
 // Adding program modules
@@ -82,18 +81,6 @@ void clearLine() {
     std::cout << "\033[K";
 #endif
     std::cout.flush();
-}
-
-//------------------------------------------------------------------------------
-// CPU Feature Detection
-bool hasAVX2() {
-#ifdef _WIN32
-    int cpuInfo[4];
-    __cpuid(cpuInfo, 1);
-    return (cpuInfo[2] & (1 << 5)) && (cpuInfo[2] & (1 << 3)); // AVX and OSXSAVE
-#else
-    return true; // Assume supported on non-Windows
-#endif
 }
 
 //------------------------------------------------------------------------------
@@ -645,11 +632,6 @@ Int minKey, maxKey;
     // Initialize console with Windows optimizations
     initConsole();
     clearTerminal();
-    // Check CPU features
-    if (!hasAVX2()) {
-        std::cerr << "ERROR: AVX2 instructions not supported on this CPU\n";
-        return 1;
-    }
     bool hash160Provided = false, rangeProvided = false, puzzleProvided = false;
     bool randomMode = false; // Default to sequential mode
     std::string targetHash160Hex;
@@ -850,10 +832,6 @@ Int minKey, maxKey;
            foundPrivateKeyHex, foundPublicKeyHex, lastStatusTime, lastSaveTime, g_progressSaveCount, \
            g_threadPrivateKeys)
 {
-    #ifdef _WIN32
-       SetThreadAffinityMask(GetCurrentThread(), 1 << omp_get_thread_num());
-    #endif
-
     const int threadId = omp_get_thread_num();
 
     // Initialize Xoshiro256plus PRNG for this thread
