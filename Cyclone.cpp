@@ -17,6 +17,7 @@
 
 #ifdef _WIN32
     #include <windows.h>
+    #include <intrin.h>
 #endif
 
 // Adding program modules
@@ -28,6 +29,75 @@
 #include "IntGroup.h"
 #include "tee_stream.h"
 
+// Verify 64-bit compilation
+static_assert(sizeof(void*) == 8, "This program requires 64-bit compilation");
+
+//------------------------------------------------------------------------------
+// Cross-platform terminal functions with Windows optimizations
+void initConsole() {
+#ifdef _WIN32
+    HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+    DWORD mode = 0;
+    GetConsoleMode(hConsole, &mode);
+    SetConsoleMode(hConsole, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+#endif
+}
+
+void clearTerminal() {
+#ifdef _WIN32
+    HANDLE hStdOut = GetStdHandle(STD_OUTPUT_HANDLE);
+    COORD coord = {0, 0};
+    DWORD count;
+    CONSOLE_SCREEN_BUFFER_INFO csbi;
+    GetConsoleScreenBufferInfo(hStdOut, &csbi);
+    FillConsoleOutputCharacter(hStdOut, ' ', csbi.dwSize.X * csbi.dwSize.Y, coord, &count);
+    SetConsoleCursorPosition(hStdOut, coord);
+#else
+    std::cout << "\033[2J\033[H";
+#endif
+    std::cout.flush();
+}
+
+void moveCursorTo(int x, int y) {
+#ifdef _WIN32
+    HANDLE hStdOut = GetStdHandle(STD_OUTPUT_HANDLE);
+    COORD coord = {(SHORT)x, (SHORT)y};
+    SetConsoleCursorPosition(hStdOut, coord);
+#else
+    std::cout << "\033[" << y << ";" << x << "H";
+#endif
+    std::cout.flush();
+}
+
+void clearLine() {
+#ifdef _WIN32
+    HANDLE hStdOut = GetStdHandle(STD_OUTPUT_HANDLE);
+    CONSOLE_SCREEN_BUFFER_INFO csbi;
+    GetConsoleScreenBufferInfo(hStdOut, &csbi);
+    COORD coord = {0, csbi.dwCursorPosition.Y};
+    DWORD count;
+    FillConsoleOutputCharacter(hStdOut, ' ', csbi.dwSize.X, coord, &count);
+    SetConsoleCursorPosition(hStdOut, coord);
+#else
+    std::cout << "\033[K";
+#endif
+    std::cout.flush();
+}
+
+//------------------------------------------------------------------------------
+// CPU Feature Detection
+bool hasAVX2() {
+#ifdef _WIN32
+    int cpuInfo[4];
+    __cpuid(cpuInfo, 1);
+    return (cpuInfo[2] & (1 << 5)) && (cpuInfo[2] & (1 << 3)); // AVX and OSXSAVE
+#else
+    return true; // Assume supported on non-Windows
+#endif
+}
+
+//------------------------------------------------------------------------------
+// Constants and Configuration
 #define BISIZE 256
 #if BISIZE == 256
 #define NB64BLOCK 5
@@ -36,24 +106,19 @@
 #error Unsupported size
 #endif
 
-//------------------------------------------------------------------------------
-// Batch size: ±256 public keys (512), hashed in groups of 8 (AVX2).
+// Batch sizes optimized for Windows
 static constexpr int POINTS_BATCH_SIZE = 256;
 static constexpr int HASH_BATCH_SIZE   = 8;
 int g_prefixLength = 4; // Default prefix length
 
-// Status output and progress saving frequency
+// Status output intervals
 static constexpr double statusIntervalSec = 5.0;
 static constexpr double saveProgressIntervalSec = 600.0;
 
+// Global state
 static int g_progressSaveCount = 0;
 static std::vector<std::string> g_threadPrivateKeys;
 std::mutex coutMutex;
-
-static void clearTerminal() {
-    std::cout << "\033[2J\033[H";
-    std::cout.flush();
-}
 
 //------------------------------------------------------------------------------
 void saveProgressToFile(const std::string &progressStr) {
@@ -377,22 +442,23 @@ static void printStatsBlock(int numCPUs, const std::string &targetHash160Hex,
 {
     std::lock_guard<std::mutex> lock(coutMutex);
     static bool firstPrint = true;
+    
     if (!firstPrint) {
-        std::cout << "\033[1;1H";
-
+        moveCursorTo(1, 1);
         for (int i = 0; i < 8; i++) {
-            std::cout << "\033[K" << "\n";
+            clearLine();
+            moveCursorTo(1, 1 + i + 1);
         }
-
     } else {
         firstPrint = false;
     }
-    std::cout << "\033[1;1H";
+    
+    moveCursorTo(1, 1);
     std::cout << "================= WORK IN PROGRESS =================\n";
-    std::cout << "Puzzle/Bits   : " << puzzle << "\n"; // Print puzzle value
+    std::cout << "Puzzle/Bits   : " << puzzle << "\n";
     std::cout << "Target Hash160: " << targetHash160Hex << "\n";
     std::cout << "Prefix length : " << g_prefixLength << " bytes" << "\n";
-    std::cout << "Mode          : " << (randomMode ? "Random" : "Sequential") << "\n"; // Add Mode
+    std::cout << "Mode          : " << (randomMode ? "Random" : "Sequential") << "\n";
     std::cout << "CPU Threads   : " << numCPUs << "\n";
     std::cout << "Mkeys/s       : " << std::fixed << std::setprecision(2) << mkeysPerSec << "\n";
     std::cout << "Total Checked : " << totalChecked << "\n";
@@ -400,7 +466,7 @@ static void printStatsBlock(int numCPUs, const std::string &targetHash160Hex,
     std::cout << "Range         : " << rangeStr << "\n";
     std::cout << "Progress      : " << (randomMode ? "N/A" : std::to_string(progressPercent) + " %") << "\n";
     std::cout << "Progress Save : " << progressSaves << "\n";
-    std::cout << "Stride        : " << stride << "\n"; // Add Stride
+    std::cout << "Stride        : " << stride << "\n";
     std::cout.flush();
 }
 
@@ -573,8 +639,17 @@ std::vector<std::pair<std::string, std::string>> readRangesFromFile(const std::s
 
 Int minKey, maxKey;
 
-int main(int argc, char *argv[]) {
+//------------------------------------------------------------------------------
+//  Main Program
+    int main(int argc, char *argv[]) {
+    // Initialize console with Windows optimizations
+    initConsole();
     clearTerminal();
+    // Check CPU features
+    if (!hasAVX2()) {
+        std::cerr << "ERROR: AVX2 instructions not supported on this CPU\n";
+        return 1;
+    }
     bool hash160Provided = false, rangeProvided = false, puzzleProvided = false;
     bool randomMode = false; // Default to sequential mode
     std::string targetHash160Hex;
@@ -775,6 +850,10 @@ int main(int argc, char *argv[]) {
            foundPrivateKeyHex, foundPublicKeyHex, lastStatusTime, lastSaveTime, g_progressSaveCount, \
            g_threadPrivateKeys)
 {
+    #ifdef _WIN32
+       SetThreadAffinityMask(GetCurrentThread(), 1 << omp_get_thread_num());
+    #endif
+
     const int threadId = omp_get_thread_num();
 
     // Initialize Xoshiro256plus PRNG for this thread
@@ -969,8 +1048,8 @@ int main(int argc, char *argv[]) {
                                                 matchFound = false;
                                                 // Print the partial match information
                                                 std::lock_guard<std::mutex> lock(coutMutex);
-                                                std::cout << "\033[14;1H";
-                                                std::cout << "\033[K";
+                                                moveCursorTo(1, 14);
+                                                clearLine();
                                                 std::cout << "================== PARTIAL MATCH FOUND! ============\n";
                                                 std::cout << "Prefix length : " << g_prefixLength << " bytes" << "\n";
                                                 std::cout << "Private Key   : " << foundPrivateKeyHex << "\n";
@@ -1110,8 +1189,8 @@ int main(int argc, char *argv[]) {
         globalElapsedTime = std::chrono::duration<double>(tEnd - tStart).count();
 
         if (!matchFound) {
-            std::cout << "\033[14;1H";
-            std::cout << "\033[K";
+            moveCursorTo(1, 14);
+            clearLine();
             std::cout << "================= NO MATCH FOUND =================";               
             mkeysPerSec = (double)globalComparedCount / globalElapsedTime / 1e6;
             std::cout << "\nNo match found in range: " << rangeStartHex << ":" << rangeEndHex << "\n";
