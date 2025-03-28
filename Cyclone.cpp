@@ -1067,9 +1067,9 @@ Int minKey, maxKey;
             }
         }
 
-        // Save progress
+        // Save progress (only in sequential mode)
         double secondsSinceSave = std::chrono::duration<double>(now - lastSaveTime).count();
-        if (secondsSinceSave >= saveProgressIntervalSec && threadId == 0) {
+        if (!randomMode && secondsSinceSave >= saveProgressIntervalSec && threadId == 0) {
             #pragma omp critical
             {
                 g_progressSaveCount++;
