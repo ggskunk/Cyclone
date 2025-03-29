@@ -34,75 +34,53 @@ static uint64_t MM64;     // 64bits lsb negative inverse of P
 
 extern Int _ONE;
 
-// ------------------------------------------------
-
-void Int::ModAdd(Int *a) {
+// Define ModHelper for addition operations
+template <typename Func>
+void Int::ModHelper(Func opFunc) {
   Int p;
-  Add(a);
-  p.Sub(this,&_P);
-  if(p.IsPositive())
-    Set(&p);
+  opFunc();
+  p.Sub(this, &_P);
+  if (p.IsPositive()) Set(&p);
+}
+
+// Define ModSubHelper for subtraction and negation operations
+template <typename Func>
+void Int::ModSubHelper(Func opFunc) {
+  opFunc();
+  if (IsNegative()) Add(&_P);
 }
 
 // ------------------------------------------------
+void Int::ModAdd(Int *a) {
+  ModHelper([this, a]() { Add(a); });
+}
 
 void Int::ModAdd(Int *a, Int *b) {
-  Int p;
-  Add(a,b);
-  p.Sub(this,&_P);
-  if(p.IsPositive())
-    Set(&p);
+  ModHelper([this, a, b]() { Add(a, b); });
 }
-
-// ------------------------------------------------
 
 void Int::ModDouble() {
-  Int p;
-  Add(this);
-  p.Sub(this,&_P);
-  if(p.IsPositive())
-    Set(&p);
+  ModHelper([this]() { Add(this); });
 }
-
-// ------------------------------------------------
 
 void Int::ModAdd(uint64_t a) {
-  Int p;
-  Add(a);
-  p.Sub(this,&_P);
-  if(p.IsPositive())
-    Set(&p);
+  ModHelper([this, a]() { Add(a); });
 }
-
-// ------------------------------------------------
 
 void Int::ModSub(Int *a) {
-  Sub(a);
-  if (IsNegative())
-    Add(&_P);
+  ModSubHelper([this, a]() { Sub(a); });
 }
-
-// ------------------------------------------------
 
 void Int::ModSub(uint64_t a) {
-  Sub(a);
-  if (IsNegative())
-    Add(&_P);
+  ModSubHelper([this, a]() { Sub(a); });
 }
 
-// ------------------------------------------------
-
-void Int::ModSub(Int *a,Int *b) {
-  Sub(a,b);
-  if (IsNegative())
-    Add(&_P);
+void Int::ModSub(Int *a, Int *b) {
+  ModSubHelper([this, a, b]() { Sub(a, b); });
 }
-
-// ------------------------------------------------
 
 void Int::ModNeg() {
-  Neg();
-  Add(&_P);
+  ModSubHelper([this]() { Neg(); });
 }
 
 // ------------------------------------------------
@@ -1294,4 +1272,3 @@ void Int::ModMulK1order(Int *a) {
     Set(&t);
 
 }
-
