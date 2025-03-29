@@ -833,40 +833,50 @@ void Int::MontgomeryMult(Int* a) {
 }
 
 void Int::MontgomeryMult(Int *a, Int *b) {
-
-  // Compute a*b*R^-1 (mod n),  R=2^k (mod n), k = Msize*64
-  // a and b must be lower than n
-  // See SetupField()
-
-  Int pr;
-  Int p;
-  uint64_t ML;
-  uint64_t c;
-
-  // i = 0
-  imm_umul(a->bits64, b->bits64[0], pr.bits64);
-  ML = pr.bits64[0] * MM64;
-  imm_umul(_P.bits64, ML, p.bits64);
-  c = pr.AddC(&p);
-  memcpy(bits64,pr.bits64 + 1,8*(NB64BLOCK-1));
-  bits64[NB64BLOCK-1] = c;
-
-  for (int i = 1; i < Msize; i++) {
-
-    imm_umul(a->bits64, b->bits64[i], pr.bits64);
-    ML = (pr.bits64[0] + bits64[0]) * MM64;
+    // Compute a*b*R^-1 (mod n), R=2^k (mod n), k = Msize*64
+    
+    Int pr;
+    Int p;
+    uint64_t ML;
+    uint64_t c;
+    imm_umul(a->bits64, b->bits64[0], pr.bits64);
+    ML = pr.bits64[0] * MM64;
     imm_umul(_P.bits64, ML, p.bits64);
-	  c = pr.AddC(&p);
-    AddAndShift(this, &pr, c);
-
-  }
-
-  p.Sub(this, &_P);
-  if (p.IsPositive())
-    Set(&p);
-
+    c = pr.AddC(&p);
+    
+    // AVX2 copy for aligned chunks (enhanced version)
+    const int total_blocks = NB64BLOCK - 1;
+    const int vec_blocks = total_blocks / 4;
+    const int rem_blocks = total_blocks % 4;
+    
+    // Process 4 elements at a time
+    uint64_t* src_ptr = pr.bits64 + 1;
+    uint64_t* dst_ptr = bits64;
+    
+    for (int i = 0; i < vec_blocks; i++) {
+        __m256i chunk = _mm256_loadu_si256((__m256i*)src_ptr);
+        _mm256_storeu_si256((__m256i*)dst_ptr, chunk);
+        src_ptr += 4;
+        dst_ptr += 4;
+    }
+    
+    // Handle remaining elements (0-3)
+    for (int i = 0; i < rem_blocks; i++) {
+        *dst_ptr++ = *src_ptr++;
+    }
+    
+    bits64[NB64BLOCK-1] = c;
+    for (int i = 1; i < Msize; i++) {
+        imm_umul(a->bits64, b->bits64[i], pr.bits64);
+        ML = (pr.bits64[0] + bits64[0]) * MM64;
+        imm_umul(_P.bits64, ML, p.bits64);
+        c = pr.AddC(&p);
+        AddAndShift(this, &pr, c); // Critical - remains scalar
+    }
+    p.Sub(this, &_P);
+    if (p.IsPositive())
+        Set(&p);
 }
-
 
 // SecpK1 specific section -----------------------------------------------------------------------------
 
