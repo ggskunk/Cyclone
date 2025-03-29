@@ -195,7 +195,10 @@ public:
   };
 
 private:
-
+  template <typename Func>
+  void ModHelper(Func opFunc);
+  template <typename Func>
+  void ModSubHelper(Func opFunc);
   void MatrixVecMul(Int *u,Int *v,int64_t _11,int64_t _12,int64_t _21,int64_t _22,uint64_t *cu,uint64_t* cv);
   void MatrixVecMul(Int* u,Int* v,int64_t _11,int64_t _12,int64_t _21,int64_t _22);
   uint64_t AddCh(Int *a,uint64_t ca,Int* b,uint64_t cb);
@@ -386,4 +389,3 @@ static inline int isStrictGreater128(uint64_t h1,uint64_t l1,uint64_t h2,uint64_
 }
 
 #endif // BIGINTH
-
