@@ -843,14 +843,28 @@ Int minKey, maxKey;
     alignas(32) uint8_t localHashResults[HASH_BATCH_SIZE][20];
     int pointIndices[HASH_BATCH_SIZE];
 
-    // Main processing loop
+   // Main processing loop
     while (!matchFound) {
         Int currentBatchKey;
-        if (randomMode) {
-            currentBatchKey = generateRandomPrivateKey(minKey, maxKey, rng);
+
+         if (randomMode) {
+         // PURE RANDOM MODE
+         currentBatchKey = generateRandomPrivateKey(minKey, maxKey, rng);
+
+        #pragma omp critical
+        { g_threadPrivateKeys[threadId] = padHexTo64(intToHex(currentBatchKey)); }
         } else {
-            if (intGreater(privateKey, threadRangeEnd)) break;
-            currentBatchKey.Set(&privateKey);
+        // PURE SEQUENTIAL MODE
+        if (intGreater(privateKey, threadRangeEnd)) break;
+        currentBatchKey.Set(&privateKey);
+
+        #pragma omp critical
+        { g_threadPrivateKeys[threadId] = padHexTo64(intToHex(privateKey)); }
+
+        // Fixed increment (no randomness)
+        Int step;
+        step.SetInt32(stride * (fullBatchSize - 2));
+        privateKey.Add(&step);
         }
 
         Point startPoint = secp.ComputePublicKey(&currentBatchKey);
@@ -859,11 +873,6 @@ Int minKey, maxKey;
         startPointY.Set(&startPoint.y);
         startPointXNeg.Set(&startPointX);
         startPointXNeg.ModNeg();
-
-        #pragma omp critical
-        {
-            g_threadPrivateKeys[threadId] = padHexTo64(intToHex(privateKey));
-        }
 
         // Compute deltaX values in batches of 4
         for (int i = 0; i < POINTS_BATCH_SIZE; i += 4) {
