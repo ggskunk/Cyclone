@@ -548,19 +548,65 @@ void Int::ModInv() {
 
 // ------------------------------------------------
 
-void Int::ModExp(Int *e) {
-
-  Int base(this);
-  SetInt32(1);
-  uint32_t i = 0;
-
-  uint32_t nbBit = e->GetBitLength();
-  for(int i=0;i<(int)nbBit;i++) {
-    if (e->GetBit(i))
-      ModMul(&base);
-    base.ModMul(&base);
-  }
-
+void Int::ModExp(Int* e) {
+    const int windowSize = 6;  // 6-bit window (optimal for large exponents)
+    const int tableSize = 1 << windowSize;  // 64 precomputed values
+    
+    // Precompute powers 0..63 (0 is unused but keeps indexing simple)
+    Int* table = new Int[tableSize];
+    
+    // Initialize table[0] and table[1]
+    table[0].SetInt32(0);  // Unused but initialized for safety
+    table[1] = *this;
+    
+    // Compute table[2] = this^2
+    table[2] = table[1];
+    table[2].ModMul(this);
+    
+    // Compute odd entries using addition chain
+    for (int i = 3; i < tableSize; i += 2) {
+        // table[i] = table[i-1] * this
+        table[i] = table[i-1];
+        table[i].ModMul(this);
+        
+        // table[i+1] = table[i>>1]^2 (when i+1 is even)
+        if (i+1 < tableSize) {
+            table[i+1] = table[(i+1)>>1];
+            table[i+1].ModMul(&table[(i+1)>>1]);
+        }
+    }
+    
+    // Initialize result
+    SetInt32(1);
+    
+    // Process exponent from MSB to LSB
+    uint32_t nbBit = e->GetBitLength();
+    int i = nbBit - 1;
+    
+    while (i >= 0) {
+        if (!e->GetBit(i)) {
+            ModMul(this);  // Square
+            i--;
+        } else {
+            // Extract 6-bit window (or remaining bits)
+            int window = 0;
+            int bits = std::min(windowSize, i + 1);
+            
+            for (int j = 0; j < bits; j++) {
+                window = (window << 1) | e->GetBit(i - j);
+            }
+            
+            // Apply window
+            for (int j = 0; j < bits; j++) {
+                ModMul(this);  // Square 'bits' times
+            }
+            ModMul(&table[window]);  // Multiply by precomputed value
+            
+            i -= bits;
+        }
+    }
+    
+    delete[] table;
 }
 
 // ------------------------------------------------
