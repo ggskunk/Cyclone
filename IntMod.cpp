@@ -772,10 +772,14 @@ void Int::SetupField(Int *n, Int *R, Int *R2, Int *R3, Int *R4) {
 }
 
 inline uint64_t AddWithCarry(uint64_t a, uint64_t b, uint64_t* carry) {
-    __asm__("addq %2, %0; adcq $0, %1" 
-            : "+r"(a), "+r"(*carry) 
-            : "r"(b) 
-            : "cc");
+    __asm__(
+        "addq %[b], %[a]\n\t"   // Add b to a, set carry flag if overflow occurs
+        "adcq $0, %[carry]"      // Add carry flag to *carry (output carry)
+        : [a] "+r" (a),          // Input/output operand: a
+          [carry] "+m" (*carry)  // Memory operand for input/output carry
+        : [b] "r" (b)            // Input operand: b
+        : "cc"                   // Clobbered flags: condition codes
+    );
     return a;
 }
 
