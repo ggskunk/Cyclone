@@ -872,36 +872,31 @@ Int minKey, maxKey;
     //SIMD comparison
     const __m256i target32 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(targetHash160.data()));
 
-   // Main processing loop
+    // Main processing loop
     while (!matchFound) {
         Int currentBatchKey;
-
-         if (randomMode) {
-         // PURE RANDOM MODE
-         currentBatchKey = generateRandomPrivateKey(minKey, maxKey, rng);
-
-        #pragma omp critical
-        { g_threadPrivateKeys[threadId] = padHexTo64(intToHex(currentBatchKey)); }
+        if (randomMode) {
+            currentBatchKey = generateRandomPrivateKey(minKey, maxKey, rng);
         } else {
-        // PURE SEQUENTIAL MODE
-        if (intGreater(privateKey, threadRangeEnd)) break;
-        currentBatchKey.Set(&privateKey);
-
-        #pragma omp critical
-        { g_threadPrivateKeys[threadId] = padHexTo64(intToHex(privateKey)); }
-
-        // Fixed increment (no randomness)
-        Int step;
-        step.SetInt32(stride * (fullBatchSize - 2));
-        privateKey.Add(&step);
+            if (intGreater(privateKey, threadRangeEnd)) {
+                break;
+            }
+            currentBatchKey.Set(&privateKey);
         }
 
         Point startPoint = secp.ComputePublicKey(&currentBatchKey);
+
+        // Precompute frequently used values
         Int startPointX, startPointY, startPointXNeg;
         startPointX.Set(&startPoint.x);
         startPointY.Set(&startPoint.y);
         startPointXNeg.Set(&startPointX);
         startPointXNeg.ModNeg();
+
+        #pragma omp critical
+        {
+            g_threadPrivateKeys[threadId] = padHexTo64(intToHex(privateKey));
+        }
 
         // Compute deltaX values for all points
         for (int i = 0; i < POINTS_BATCH_SIZE; i += 4) {
