@@ -1086,10 +1086,9 @@ Int minKey, maxKey;
                 }
 
                 // Next step
-                {
-                    Int step;
-                    step.SetInt32(stride * (fullBatchSize - 2)); 
-                    privateKey.Add(&step);
+                if (!randomMode) {
+                Int step; step.SetInt32(stride * (fullBatchSize - 2));
+                privateKey.Add(&step);
                 }
 
                 // Time to show status
@@ -1123,10 +1122,10 @@ Int minKey, maxKey;
                     }
                 }
 
-                // Save progress periodically
+                // Save progress (only in sequential mode)
                 auto nowSave = std::chrono::high_resolution_clock::now();
                 double secondsSinceSave = std::chrono::duration<double>(nowSave - lastSaveTime).count();
-                if (secondsSinceSave >= saveProgressIntervalSec) {
+                if (!randomMode && secondsSinceSave >= saveProgressIntervalSec && threadId == 0) {
                     #pragma omp critical
                     {
                         if (threadId == 0) {
