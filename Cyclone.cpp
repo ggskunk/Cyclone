@@ -1020,7 +1020,7 @@ Int minKey, maxKey;
                                                 matchFound = false;
                                                 // Print the partial match information
                                                 std::lock_guard<std::mutex> lock(coutMutex);
-                                                std::cout << "\033[14;1H";
+                                                std::cout << "\033[15;1H";
                                                 std::cout << "\033[K";
                                                 std::cout << "================== PARTIAL MATCH FOUND! ============\n";
                                                 std::cout << "Prefix length : " << g_prefixLength << " bytes" << "\n";
