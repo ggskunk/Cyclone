@@ -903,11 +903,6 @@ Int minKey, maxKey;
         startPointXNeg.Set(&startPointX);
         startPointXNeg.ModNeg();
 
-        #pragma omp critical
-        {
-            g_threadPrivateKeys[threadId] = padHexTo64(intToHex(privateKey));
-        }
-
         // Compute deltaX values for all points
         for (int i = 0; i < POINTS_BATCH_SIZE; i += 4) {
             // Process 4 elements at a time for better instruction pipelining
