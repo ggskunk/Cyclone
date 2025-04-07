@@ -3,13 +3,13 @@
 import random
 import subprocess
 
-puzzle = 68
-h160 = "e0b8a2baee1b77fc703455f39d51477451fc8cfc"
+puzzle = 69
+h160 = "61eb8a50c86b0584bb727dd65bed8d2400d6d5aa"
 
 # Constants
 LOWER_BOUND = 2 ** (puzzle - 1)
 UPPER_BOUND = (2**puzzle) - 1
-BIT_GAP = 2**26  # 26-bit gap 
+BIT_GAP = 2**33  # 26-bit gap 
 
 count = 0
 
