@@ -88,13 +88,12 @@ void clearLine() {
 // Constants and Configuration
 #define BISIZE 256
 #if BISIZE == 256
-#define NB64BLOCK 5
-#define NB32BLOCK 10
+    #define NB64BLOCK 5
+    #define NB32BLOCK 10
 #else
-#error Unsupported size
+    #error Unsupported size
 #endif
 
-// Batch sizes optimized for Windows
 static constexpr int POINTS_BATCH_SIZE = 256;
 static constexpr int HASH_BATCH_SIZE   = 8;
 int g_prefixLength = 4; // Default prefix length
@@ -109,6 +108,7 @@ static std::vector<std::string> g_threadPrivateKeys;
 std::mutex coutMutex;
 
 //------------------------------------------------------------------------------
+// Log progress to file
 void saveProgressToFile(const std::string &progressStr) {
     std::ofstream ofs("progress.txt", std::ios::app);
     if (ofs) {
@@ -119,6 +119,7 @@ void saveProgressToFile(const std::string &progressStr) {
 }
 
 //------------------------------------------------------------------------------
+// Big number conversion functions
 std::vector<uint64_t> hexToBigNum(const std::string& hex) {
     std::vector<uint64_t> bigNum;
     const size_t len = hex.size();
@@ -153,7 +154,7 @@ std::vector<uint64_t> bigNumAdd(const std::vector<uint64_t>& a, const std::vecto
     for (size_t i = 0, sz = std::max(a.size(), b.size()); i < sz; ++i) {
         uint64_t x = (i < a.size()) ? a[i] : 0ULL;
         uint64_t y = (i < b.size()) ? b[i] : 0ULL;
-        __uint128_t s = ( __uint128_t )x + ( __uint128_t )y + carry;
+        __uint128_t s = (__uint128_t)x + (__uint128_t)y + carry;
         carry = (uint64_t)(s >> 64);
         sum.push_back((uint64_t)s);
     }
@@ -218,25 +219,19 @@ long double hexStrToLongDouble(const std::string &hex) {
 }
 
 //------------------------------------------------------------------------------
-
 // Function to calculate the puzzle size based on the range
 int calculatePuzzleSize(const std::string& startHex, const std::string& endHex) {
-    // Convert the hexadecimal strings to big numbers
     auto start = hexToBigNum(startHex);
     auto end = hexToBigNum(endHex);
-
-    // Calculate the range size
     auto rangeSize = bigNumSubtract(end, start);
     rangeSize = bigNumAdd(rangeSize, singleElementVector(1ULL)); // Include both endpoints
-
-    // Calculate the number of bits required to represent the range size
     long double rangeSizeLD = hexStrToLongDouble(bigNumToHex(rangeSize));
     int puzzleSize = static_cast<int>(std::log2(rangeSizeLD)) + 1;
-
     return puzzleSize;
 }
 
 //------------------------------------------------------------------------------
+// Helper functions for Int and Point conversion
 static inline std::string padHexTo64(const std::string &hex) {
     return (hex.size() >= 64) ? hex : std::string(64 - hex.size(), '0') + hex;
 }
@@ -289,6 +284,7 @@ static inline void pointToCompressedBin(const Point &point, uint8_t outCompresse
 }
 
 //------------------------------------------------------------------------------
+// Prepare hash blocks for SHA-256 and RIPEMD-160
 inline void prepareShaBlock(const uint8_t* dataSrc, size_t dataLen, uint8_t* outBlock) {
     std::fill_n(outBlock, 64, 0);
     std::memcpy(outBlock, dataSrc, dataLen);
@@ -311,7 +307,8 @@ inline void prepareRipemdBlock(const uint8_t* dataSrc, uint8_t* outBlock) {
     outBlock[63] = (uint8_t)( bitLen        & 0xFF);
 }
 
-// Computing hash160 using avx2 (8 hashes per try)
+//------------------------------------------------------------------------------
+// Computing hash160 using AVX2 (8 hashes per try)
 static void computeHash160BatchBinSingle(int numKeys,
                                          uint8_t pubKeys[][33],
                                          uint8_t hashResults[][20])
@@ -331,7 +328,7 @@ static void computeHash160BatchBinSingle(int numKeys,
             prepareShaBlock(pubKeys[batch * HASH_BATCH_SIZE + i], 33, shaInputs[i].data());
         }
         
-        // Use precomputed padding to fill remaining slots instead of copying first element
+        // If not full batch, fill remaining slots with precomputed padding block
         if (batchCount < HASH_BATCH_SIZE) {
             static std::array<uint8_t, 64> shaPadding = {};
             prepareShaBlock(pubKeys[0], 33, shaPadding.data());
@@ -348,18 +345,18 @@ static void computeHash160BatchBinSingle(int numKeys,
             outPtr[i] = shaOutputs[i].data();
         }
 
-        // SHA256 (AVX2)
+        // Perform SHA256 (AVX2)
         sha256avx2_8B(inPtr[0], inPtr[1], inPtr[2], inPtr[3],
                       inPtr[4], inPtr[5], inPtr[6], inPtr[7],
                       outPtr[0], outPtr[1], outPtr[2], outPtr[3],
                       outPtr[4], outPtr[5], outPtr[6], outPtr[7]);
 
-        // Prepare RIPEMD-160 input blocks
+        // Prepare RIPEMD-160 input blocks using SHA outputs
         for (size_t i = 0; i < batchCount; i++) {
             prepareRipemdBlock(shaOutputs[i].data(), ripemdInputs[i].data());
         }
 
-        // Use precomputed padding instead of copying first element
+        // If not full batch, fill remaining slots with a precomputed padding block
         if (batchCount < HASH_BATCH_SIZE) {
             static std::array<uint8_t, 64> ripemdPadding = {};
             prepareRipemdBlock(shaOutputs[0].data(), ripemdPadding.data());
@@ -374,7 +371,7 @@ static void computeHash160BatchBinSingle(int numKeys,
             outPtr[i] = ripemdOutputs[i].data();
         }
 
-        // RIPEMD-160 (AVX2)
+        // Perform RIPEMD-160 (AVX2)
         ripemd160avx2::ripemd160avx2_32(
             (unsigned char*)inPtr[0],
             (unsigned char*)inPtr[1],
@@ -388,7 +385,7 @@ static void computeHash160BatchBinSingle(int numKeys,
             outPtr[4], outPtr[5], outPtr[6], outPtr[7]
         );
 
-        // Copy results to output array
+        // Copy hash results to output array
         for (size_t i = 0; i < batchCount; i++) {
             std::memcpy(hashResults[batch * HASH_BATCH_SIZE + i], ripemdOutputs[i].data(), 20);
         }
@@ -396,6 +393,7 @@ static void computeHash160BatchBinSingle(int numKeys,
 }
 
 //------------------------------------------------------------------------------
+// Print usage instructions
 static void printUsage(const char *programName) {
     std::cerr << "Usage: " << programName << " -h <hash160_hex> [-p <puzzle> | -r <startHex:endHex> | -f <range_file>] -b <prefix_length> [-R | -S] [-t <threads>] [-s <stride>]\n";
     std::cerr << "  -R : Use random mode (default is sequential)\n";
@@ -415,11 +413,13 @@ static std::string formatElapsedTime(double seconds) {
         << std::setw(2) << std::setfill('0') << secs;
     return oss.str();
 }
+
 //------------------------------------------------------------------------------
+// Optimized status output to avoid browser memory overload (static console output)
 static void printStatsBlock(int numCPUs, const std::string &targetHash160Hex,
                             const std::string &rangeStr, double mkeysPerSec,
                             unsigned long long totalChecked, double elapsedTime,
-                            int puzzle, bool randomMode, const std::string& partialMatchInfo = "",
+                            int puzzle, bool randomMode, const std::string &partialMatchInfo = "",
                             int progressSaves = 0, long double progressPercent = 0.0L, int stride = 1)
 {
     std::lock_guard<std::mutex> lock(coutMutex);
@@ -427,10 +427,7 @@ static void printStatsBlock(int numCPUs, const std::string &targetHash160Hex,
     
     if (!firstPrint) {
         moveCursorTo(1, 1);
-        for (int i = 0; i < 8; i++) {
-            clearLine();
-            moveCursorTo(1, 1 + i + 1);
-        }
+        clearLine();
     } else {
         firstPrint = false;
     }
@@ -439,21 +436,27 @@ static void printStatsBlock(int numCPUs, const std::string &targetHash160Hex,
     std::cout << "================= WORK IN PROGRESS =================\n";
     std::cout << "Puzzle/Bits   : " << puzzle << "\n";
     std::cout << "Target Hash160: " << targetHash160Hex.substr(0, 15) << "..." << targetHash160Hex.substr(25) << "\n";
-    std::cout << "Prefix length : " << g_prefixLength << " bytes" << "\n";
+    std::cout << "Prefix length : " << g_prefixLength << " bytes\n";
     std::cout << "Mode          : " << (randomMode ? "Random" : "Sequential") << "\n";
     std::cout << "CPU Threads   : " << numCPUs << "\n";
     std::cout << "Mkeys/s       : " << std::fixed << std::setprecision(2) << mkeysPerSec << "\n";
     std::cout << "Total Checked : " << totalChecked << "\n";
-    std::cout << "Elapsed Time  : " << formatElapsedTime(elapsedTime) << "\n"; 
+    std::cout << "Elapsed Time  : " << formatElapsedTime(elapsedTime) << "\n";
     std::cout << "Start Range   : " << rangeStr.substr(0, rangeStr.find(':')) << "\n";
     std::cout << "End Range     : " << rangeStr.substr(rangeStr.find(':') + 1) << "\n";
-    std::cout << "Progress      : " << [&](){ if (randomMode) return std::string("N/A"); std::ostringstream oss; oss << std::fixed << std::setprecision(1) << progressPercent; return oss.str() + " %"; }() << "\n";
+    std::cout << "Progress      : " << [&](){ 
+        if (randomMode) return std::string("N/A"); 
+        std::ostringstream oss; 
+        oss << std::fixed << std::setprecision(1) << progressPercent; 
+        return oss.str() + " %"; 
+    }() << "\n";
     std::cout << "Progress Save : " << progressSaves << "\n";
     std::cout << "Stride        : " << stride << "\n";
     std::cout.flush();
 }
 
 //------------------------------------------------------------------------------
+// Structure to hold thread-specific range
 struct ThreadRange {
     std::string startHex;
     std::string endHex;
@@ -462,6 +465,7 @@ struct ThreadRange {
 static std::vector<ThreadRange> g_threadRanges;
 
 //------------------------------------------------------------------------------
+// Timer class for seeding
 class Timer {
 public:
     static std::string getSeed(int length) {
@@ -474,6 +478,8 @@ public:
     }
 };
 
+//------------------------------------------------------------------------------
+// Xoshiro256+ PRNG
 class Xoshiro256plus {
 public:
     Xoshiro256plus(uint64_t seed = 0) {
@@ -486,15 +492,12 @@ public:
     uint64_t next() {
         const uint64_t result = state[0] + state[3];
         const uint64_t t = state[1] << 17;
-
         state[2] ^= state[0];
         state[3] ^= state[1];
         state[1] ^= state[2];
         state[0] ^= state[3];
-
         state[2] ^= t;
         state[3] = rotl(state[3], 45);
-
         return result;
     }
 
@@ -506,48 +509,44 @@ private:
     std::array<uint64_t, 4> state;
 };
 
+//------------------------------------------------------------------------------
+// Generate a random private key
 Int generateRandomPrivateKey(Int minKey, Int maxKey, Xoshiro256plus &rng) {
     Int randomPrivateKey((uint64_t)0);
 
-    // Validate inputs
     if (intGreater(minKey, maxKey)) {
         throw std::invalid_argument("minKey must be less than or equal to maxKey");
     }
 
-    // Calculate the range size
     Int rangeSize;
     rangeSize.Set(&maxKey);
     rangeSize.Sub(&minKey);
 
-    // Add 1 to the range size to include maxKey
     Int one;
     Int tempOne;
-    tempOne.SetBase16("1"); // Initialize tempOne with value 1
-    one.Set(&tempOne);   // Set one using the address of tempOne
+    tempOne.SetBase16("1");
+    one.Set(&tempOne);
     rangeSize.Add(&one);
 
-    // Check if rangeSize is zero (minKey == maxKey)
     if (rangeSize.IsZero()) {
-        // If rangeSize is zero, return minKey directly
         randomPrivateKey.Set(&minKey);
         return randomPrivateKey;
     }
 
-    // Generate random values in chunks of 64 bits using Xoshiro256plus
     for (int i = 0; i < NB64BLOCK; ++i) {
         uint64_t randVal = rng.next();
-        randomPrivateKey.ShiftL(64); // Shift left by 64 bits
+        randomPrivateKey.ShiftL(64);
         randomPrivateKey.Add(randVal);
     }
 
-    // Ensure the randomPrivateKey is within the range
-    randomPrivateKey.Mod(&rangeSize); // randomPrivateKey is now in [0, rangeSize - 1]
-    randomPrivateKey.Add(&minKey);    // Shift to [minKey, maxKey]
+    randomPrivateKey.Mod(&rangeSize);
+    randomPrivateKey.Add(&minKey);
 
     return randomPrivateKey;
 }
 
-// Function to read ranges from a file
+//------------------------------------------------------------------------------
+// Read ranges from a file
 std::vector<std::pair<std::string, std::string>> readRangesFromFile(const std::string& filename) {
     std::vector<std::pair<std::string, std::string>> ranges;
     std::ifstream file(filename);
@@ -558,92 +557,60 @@ std::vector<std::pair<std::string, std::string>> readRangesFromFile(const std::s
 
     std::string line;
     while (std::getline(file, line)) {
-        // Remove leading and trailing whitespace
         line.erase(0, line.find_first_not_of(" \t\n\r"));
         line.erase(line.find_last_not_of(" \t\n\r") + 1);
-
-        // Skip empty lines
-        if (line.empty()) {
-            continue;
-        }
-
-        // Find the colon separator
+        if (line.empty()) continue;
         size_t colonPos = line.find(':');
         if (colonPos == std::string::npos) {
             std::cerr << "Invalid range format in file: " << line << "\n";
             continue;
         }
-
-        // Extract start and end hex values
         std::string startHex = line.substr(0, colonPos);
         std::string endHex = line.substr(colonPos + 1);
-
-        // Remove whitespace from start and end hex values
         startHex.erase(0, startHex.find_first_not_of(" \t\n\r"));
         startHex.erase(startHex.find_last_not_of(" \t\n\r") + 1);
         endHex.erase(0, endHex.find_first_not_of(" \t\n\r"));
         endHex.erase(endHex.find_last_not_of(" \t\n\r") + 1);
-
-        // Normalize hex to uppercase
-        for (char& c : startHex) {
-            c = toupper(c);
-        }
-        for (char& c : endHex) {
-            c = toupper(c);
-        }
-
-        // Validate hex characters
+        for (char& c : startHex) { c = toupper(c); }
+        for (char& c : endHex) { c = toupper(c); }
         bool valid = true;
-        for (char c : startHex) {
-            if (!isxdigit(c)) {
-                valid = false;
-                break;
-            }
-        }
-        for (char c : endHex) {
-            if (!isxdigit(c)) {
-                valid = false;
-                break;
-            }
-        }
-
+        for (char c : startHex) { if (!isxdigit(c)) { valid = false; break; } }
+        for (char c : endHex) { if (!isxdigit(c)) { valid = false; break; } }
         if (!valid) {
             std::cerr << "Invalid hex characters in range: " << startHex << ":" << endHex << "\n";
             continue;
         }
-
-        // Add the range to the list
         ranges.emplace_back(startHex, endHex);
     }
 
     return ranges;
 }
 
+//------------------------------------------------------------------------------
+// Global variables for key ranges
 Int minKey, maxKey;
 
 //------------------------------------------------------------------------------
-//  Main Program
-    int main(int argc, char *argv[]) {
-    // Initialize console with Windows optimizations
+// Main Program
+int main(int argc, char *argv[]) {
     initConsole();
     clearTerminal();
+
     bool hash160Provided = false, rangeProvided = false, puzzleProvided = false;
-    bool randomMode = false; // Default to sequential mode
+    bool randomMode = false;
     std::string targetHash160Hex;
     std::vector<uint8_t> targetHash160;
-    int puzzle = 0; // Declare puzzle variable
+    int puzzle = 0;
     std::string rangeStartHex, rangeEndHex;
-    std::string rangeFile; // File containing ranges
-    bool rangeFileProvided = false; // Flag to indicate if a range file is provided
-    int numCPUs = omp_get_num_procs(); // Default to all available CPU cores
-    int stride = 1; // Default stride value
+    std::string rangeFile;
+    bool rangeFileProvided = false;
+    int numCPUs = omp_get_num_procs();
+    int stride = 1;
 
-    // Parse command-line arguments
     for (int i = 1; i < argc; i++) {
-        if (!std::strcmp(argv[i], "-h") && i + 1 < argc) { // Use -h for hash160_hex
+        if (!std::strcmp(argv[i], "-h") && i + 1 < argc) {
             targetHash160Hex = argv[++i];
             hash160Provided = true;
-            // Convert the hex string to a byte array
             targetHash160.resize(20);
             for (size_t j = 0; j < 20; j++) {
                 targetHash160[j] = std::stoul(targetHash160Hex.substr(j * 2, 2), nullptr, 16);
@@ -665,8 +632,6 @@ Int minKey, maxKey;
             rangeStartHex = range.substr(0, colonPos);
             rangeEndHex = range.substr(colonPos + 1);
             rangeProvided = true;
-
-            // Calculate puzzle size for the specified range
             puzzle = calculatePuzzleSize(rangeStartHex, rangeEndHex);
         } else if (!std::strcmp(argv[i], "-f") && i + 1 < argc) {
             rangeFile = argv[++i];
@@ -678,9 +643,9 @@ Int minKey, maxKey;
                 return 1;
             }
         } else if (!std::strcmp(argv[i], "-R")) {
-            randomMode = true; // Enable random mode
+            randomMode = true;
         } else if (!std::strcmp(argv[i], "-S")) {
-            randomMode = false; // Enable sequential mode
+            randomMode = false;
         } else if (!std::strcmp(argv[i], "-t") && i + 1 < argc) {
             numCPUs = std::stoi(argv[++i]);
             if (numCPUs <= 0) {
@@ -700,14 +665,12 @@ Int minKey, maxKey;
         }
     }
 
-    // Validate required arguments
     if (!hash160Provided || (!rangeProvided && !puzzleProvided && !rangeFileProvided)) {
         std::cerr << "Both -h and (-p or -r or -f) are required!\n";
         printUsage(argv[0]);
         return 1;
     }
 
-    // If a range file is provided, read ranges from the file
     std::vector<std::pair<std::string, std::string>> ranges;
     if (rangeFileProvided) {
         ranges = readRangesFromFile(rangeFile);
@@ -716,16 +679,13 @@ Int minKey, maxKey;
             return 1;
         }
     } else if (puzzleProvided) {
-        // Calculate the range based on the puzzle number
         Int one;
         one.SetBase10(const_cast<char *>("1"));
         minKey = one;
-        minKey.ShiftL(puzzle - 1); // Start of range: 2^(puzzle-1)
+        minKey.ShiftL(puzzle - 1);
         maxKey = one;
-        maxKey.ShiftL(puzzle);     // End of range: 2^puzzle
-        maxKey.Sub(&one);          // End of range: 2^puzzle - 1
-
-        // Convert minKey and maxKey to hex strings for rangeStartHex and rangeEndHex
+        maxKey.ShiftL(puzzle);
+        maxKey.Sub(&one);
         rangeStartHex = intToHex(minKey);
         rangeEndHex = intToHex(maxKey);
         ranges.emplace_back(rangeStartHex, rangeEndHex);
@@ -733,19 +693,15 @@ Int minKey, maxKey;
         ranges.emplace_back(rangeStartHex, rangeEndHex);
     }
 
-    // Flag to track if a match is found
     bool matchFound = false;
 
-    // Process each range sequentially
     for (const auto& rangePair : ranges) {
         rangeStartHex = rangePair.first;
         rangeEndHex = rangePair.second;
 
-        // Convert range to big numbers
         auto rangeStart = hexToBigNum(rangeStartHex);
         auto rangeEnd = hexToBigNum(rangeEndHex);
 
-        // Validate range
         bool validRange = false;
         if (rangeStart.size() < rangeEnd.size()) {
             validRange = true;
@@ -754,9 +710,9 @@ Int minKey, maxKey;
         } else {
             validRange = true;
             for (int i = (int)rangeStart.size() - 1; i >= 0; --i) {
-                if (rangeStart[i] < rangeEnd[i]) {
+                if (rangeStart[i] < rangeEnd[i])
                     break;
-                } else if (rangeStart[i] > rangeEnd[i]) {
+                else if (rangeStart[i] > rangeEnd[i]) {
                     validRange = false;
                     break;
                 }
@@ -767,13 +723,9 @@ Int minKey, maxKey;
             return 1;
         }
 
-        // Calculate puzzle size for the current range
         puzzle = calculatePuzzleSize(rangeStartHex, rangeEndHex);
-
-        // Reset matchFound for the new range
         matchFound = false;
 
-        // Calculate range size and split it among threads
         auto rangeSize = bigNumSubtract(rangeEnd, rangeStart);
         rangeSize = bigNumAdd(rangeSize, singleElementVector(1ULL));
 
@@ -792,10 +744,8 @@ Int minKey, maxKey;
                 currentEnd = bigNumAdd(currentEnd, singleElementVector(1ULL));
             }
             currentEnd = bigNumSubtract(currentEnd, singleElementVector(1ULL));
-
             g_threadRanges[t].startHex = bigNumToHex(currentStart);
             g_threadRanges[t].endHex = bigNumToHex(currentEnd);
-
             currentStart = bigNumAdd(currentEnd, singleElementVector(1ULL));
         }
         const std::string displayRange = g_threadRanges.front().startHex + ":" + g_threadRanges.back().endHex;
@@ -811,267 +761,244 @@ Int minKey, maxKey;
         std::string foundPrivateKeyHex;
         std::string foundPublicKeyHex;
 
-        Int one;
-        one.SetBase10(const_cast<char *>("1"));
-        Int minKey = hexToInt(rangeStartHex);
-        Int maxKey = hexToInt(rangeEndHex);
-        Int rangeSizeInt = maxKey; // Renamed to avoid conflict
-        rangeSizeInt.Sub(&minKey);
+        Int oneVal;
+        oneVal.SetBase10(const_cast<char *>("1"));
+        Int minKeyRange = hexToInt(rangeStartHex);
+        Int maxKeyRange = hexToInt(rangeEndHex);
+        Int rangeSizeInt = maxKeyRange;
+        rangeSizeInt.Sub(&minKeyRange);
 
         Secp256K1 secp;
         secp.Init();
 
-// Parallel computing block
-#pragma omp parallel num_threads(numCPUs) \
-    shared(globalComparedCount, globalElapsedTime, mkeysPerSec, matchFound, \
-           foundPrivateKeyHex, foundPublicKeyHex, lastStatusTime, lastSaveTime, g_progressSaveCount, \
-           g_threadPrivateKeys)
-{
-    const int threadId = omp_get_thread_num();
-
-    // Initialize Xoshiro256plus PRNG for this thread
-    Xoshiro256plus rng(std::chrono::steady_clock::now().time_since_epoch().count() + threadId);
-
-    Int privateKey = hexToInt(g_threadRanges[threadId].startHex);
-    const Int threadRangeEnd = hexToInt(g_threadRanges[threadId].endHex);
-
-    #pragma omp critical
-    {
-        g_threadPrivateKeys[threadId] = padHexTo64(intToHex(privateKey));
-    }
-
-    // Precomputing +i*G and -i*G for i=0..255
-    std::vector<Point> plusPoints(POINTS_BATCH_SIZE);
-    std::vector<Point> minusPoints(POINTS_BATCH_SIZE);
-    for (int i = 0; i < POINTS_BATCH_SIZE; i++) {
-        Int tmp; tmp.SetInt32(i);
-        Point p = secp.ComputePublicKey(&tmp); 
-        plusPoints[i] = p;
-        p.y.ModNeg();
-        minusPoints[i] = p;
-    }
-
-    //Structure of Arrays for better cache locality
-    std::vector<Int> deltaX(POINTS_BATCH_SIZE);
-    IntGroup modGroup(POINTS_BATCH_SIZE);
-
-    // Save 512 publickeys using Structure of Arrays
-    const int fullBatchSize = 2 * POINTS_BATCH_SIZE;
-    std::vector<Int> pointBatchX(fullBatchSize);
-    std::vector<Int> pointBatchY(fullBatchSize);
-
-    // Optimization #1: Aligned memory for AVX2 operations
-    alignas(32) uint8_t localPubKeys[fullBatchSize][33];
-    alignas(32) uint8_t localHashResults[HASH_BATCH_SIZE][20];
-    int localBatchCount = 0;
-    int pointIndices[HASH_BATCH_SIZE];
-
-    // Local count
-    unsigned long long localComparedCount = 0ULL;
-
-    //SIMD comparison
-    const __m256i target32 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(targetHash160.data()));
-
-    // Main processing loop
-    while (!matchFound) {
-        Int currentBatchKey;
-        if (randomMode) {
-            currentBatchKey = generateRandomPrivateKey(minKey, maxKey, rng);
-        } else {
-            if (intGreater(privateKey, threadRangeEnd)) {
-                break;
-            }
-            currentBatchKey.Set(&privateKey);
-        }
-
-        Point startPoint = secp.ComputePublicKey(&currentBatchKey);
-
-        // Precompute frequently used values
-        Int startPointX, startPointY, startPointXNeg;
-        startPointX.Set(&startPoint.x);
-        startPointY.Set(&startPoint.y);
-        startPointXNeg.Set(&startPointX);
-        startPointXNeg.ModNeg();
-
-        #pragma omp critical
+        #pragma omp parallel num_threads(numCPUs) \
+            shared(globalComparedCount, globalElapsedTime, mkeysPerSec, matchFound, \
+                   foundPrivateKeyHex, foundPublicKeyHex, lastStatusTime, lastSaveTime, g_progressSaveCount, \
+                   g_threadPrivateKeys)
         {
-            g_threadPrivateKeys[threadId] = padHexTo64(intToHex(privateKey));
-        }
+            const int threadId = omp_get_thread_num();
+            Xoshiro256plus rng(std::chrono::steady_clock::now().time_since_epoch().count() + threadId);
+            Int privateKey = hexToInt(g_threadRanges[threadId].startHex);
+            const Int threadRangeEnd = hexToInt(g_threadRanges[threadId].endHex);
 
-        // Compute deltaX values for all points
-        for (int i = 0; i < POINTS_BATCH_SIZE; i += 4) {
-            // Process 4 elements at a time for better instruction pipelining
-            deltaX[i].ModSub(&plusPoints[i].x, &startPointX);
-            deltaX[i+1].ModSub(&plusPoints[i+1].x, &startPointX);
-            deltaX[i+2].ModSub(&plusPoints[i+2].x, &startPointX);
-            deltaX[i+3].ModSub(&plusPoints[i+3].x, &startPointX);
-        }
-        modGroup.Set(deltaX.data());
-        modGroup.ModInv();
+            #pragma omp critical
+            {
+                g_threadPrivateKeys[threadId] = padHexTo64(intToHex(privateKey));
+            }
 
-        // Process plus points (0..255)
-        for (int i = 0; i < POINTS_BATCH_SIZE; i++) {
-            Int deltaY;
-            deltaY.ModSub(&plusPoints[i].y, &startPointY);
-            
-            Int slope;
-            slope.ModMulK1(&deltaY, &deltaX[i]);
-            
-            Int slopeSq;
-            slopeSq.ModSquareK1(&slope);
+            std::vector<Point> plusPoints(POINTS_BATCH_SIZE);
+            std::vector<Point> minusPoints(POINTS_BATCH_SIZE);
+            for (int i = 0; i < POINTS_BATCH_SIZE; i++) {
+                Int tmp; tmp.SetInt32(i);
+                Point p = secp.ComputePublicKey(&tmp);
+                plusPoints[i] = p;
+                p.y.ModNeg();
+                minusPoints[i] = p;
+            }
 
-            // Reuse precomputed startPointXNeg
-            pointBatchX[i].Set(&startPointXNeg);
-            pointBatchX[i].ModAdd(&slopeSq);
-            pointBatchX[i].ModSub(&plusPoints[i].x);
+            std::vector<Int> deltaX(POINTS_BATCH_SIZE);
+            IntGroup modGroup(POINTS_BATCH_SIZE);
 
-            Int diffX;
-            diffX.Set(&startPointX);
-            diffX.ModSub(&pointBatchX[i]);
-            diffX.ModMulK1(&slope);
-            
-            pointBatchY[i].Set(&startPointY);
-            pointBatchY[i].ModNeg();
-            pointBatchY[i].ModAdd(&diffX);
-        }
+            const int fullBatchSize = 2 * POINTS_BATCH_SIZE;
+            std::vector<Int> pointBatchX(fullBatchSize);
+            std::vector<Int> pointBatchY(fullBatchSize);
 
-        // Process minus points (256..511)
-        for (int i = 0; i < POINTS_BATCH_SIZE; i++) {
-            Int deltaY;
-            deltaY.ModSub(&minusPoints[i].y, &startPointY);
-            
-            Int slope;
-            slope.ModMulK1(&deltaY, &deltaX[i]);
-            
-            Int slopeSq;
-            slopeSq.ModSquareK1(&slope);
+            alignas(32) uint8_t localPubKeys[fullBatchSize][33];
+            alignas(32) uint8_t localHashResults[HASH_BATCH_SIZE][20];
+            int localBatchCount = 0;
+            int pointIndices[HASH_BATCH_SIZE];
 
-            // Reuse precomputed startPointXNeg
-            pointBatchX[POINTS_BATCH_SIZE + i].Set(&startPointXNeg);
-            pointBatchX[POINTS_BATCH_SIZE + i].ModAdd(&slopeSq);
-            pointBatchX[POINTS_BATCH_SIZE + i].ModSub(&minusPoints[i].x);
+            unsigned long long localComparedCount = 0ULL;
+            const __m256i target32 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(targetHash160.data()));
 
-            Int diffX;
-            diffX.Set(&startPointX);
-            diffX.ModSub(&pointBatchX[POINTS_BATCH_SIZE + i]);
-            diffX.ModMulK1(&slope);
-            
-            pointBatchY[POINTS_BATCH_SIZE + i].Set(&startPointY);
-            pointBatchY[POINTS_BATCH_SIZE + i].ModNeg();
-            pointBatchY[POINTS_BATCH_SIZE + i].ModAdd(&diffX);
-        }
+            while (!matchFound) {
+                Int currentBatchKey;
+                if (randomMode) {
+                    currentBatchKey = generateRandomPrivateKey(minKeyRange, maxKeyRange, rng);
+                } else {
+                    if (intGreater(privateKey, threadRangeEnd)) {
+                        break;
+                    }
+                    currentBatchKey.Set(&privateKey);
+                }
 
-        // Construct local buffer for hashing
-        for (int i = 0; i < fullBatchSize; i++) {
-            // Create temporary point from SoA
-            Point tempPoint;
-            tempPoint.x.Set(&pointBatchX[i]);
-            tempPoint.y.Set(&pointBatchY[i]);
-            
-            pointToCompressedBin(tempPoint, localPubKeys[localBatchCount]);
-            pointIndices[localBatchCount] = i;
-            localBatchCount++;
+                Point startPoint = secp.ComputePublicKey(&currentBatchKey);
 
-            if (localBatchCount == HASH_BATCH_SIZE) {
+                Int startPointX, startPointY, startPointXNeg;
+                startPointX.Set(&startPoint.x);
+                startPointY.Set(&startPoint.y);
+                startPointXNeg.Set(&startPointX);
+                startPointXNeg.ModNeg();
+
+                #pragma omp critical
+                {
+                    g_threadPrivateKeys[threadId] = padHexTo64(intToHex(privateKey));
+                }
+
+                for (int i = 0; i < POINTS_BATCH_SIZE; i += 4) {
+                    deltaX[i].ModSub(&plusPoints[i].x, &startPointX);
+                    deltaX[i+1].ModSub(&plusPoints[i+1].x, &startPointX);
+                    deltaX[i+2].ModSub(&plusPoints[i+2].x, &startPointX);
+                    deltaX[i+3].ModSub(&plusPoints[i+3].x, &startPointX);
+                }
+                modGroup.Set(deltaX.data());
+                modGroup.ModInv();
+
+                for (int i = 0; i < POINTS_BATCH_SIZE; i++) {
+                    Int deltaY;
+                    deltaY.ModSub(&plusPoints[i].y, &startPointY);
+                    
+                    Int slope;
+                    slope.ModMulK1(&deltaY, &deltaX[i]);
+                    
+                    Int slopeSq;
+                    slopeSq.ModSquareK1(&slope);
+
+                    pointBatchX[i].Set(&startPointXNeg);
+                    pointBatchX[i].ModAdd(&slopeSq);
+                    pointBatchX[i].ModSub(&plusPoints[i].x);
+
+                    Int diffX;
+                    diffX.Set(&startPointX);
+                    diffX.ModSub(&pointBatchX[i]);
+                    diffX.ModMulK1(&slope);
+                    
+                    pointBatchY[i].Set(&startPointY);
+                    pointBatchY[i].ModNeg();
+                    pointBatchY[i].ModAdd(&diffX);
+                }
+
+                for (int i = 0; i < POINTS_BATCH_SIZE; i++) {
+                    Int deltaY;
+                    deltaY.ModSub(&minusPoints[i].y, &startPointY);
+                    
+                    Int slope;
+                    slope.ModMulK1(&deltaY, &deltaX[i]);
+                    
+                    Int slopeSq;
+                    slopeSq.ModSquareK1(&slope);
+
+                    pointBatchX[POINTS_BATCH_SIZE + i].Set(&startPointXNeg);
+                    pointBatchX[POINTS_BATCH_SIZE + i].ModAdd(&slopeSq);
+                    pointBatchX[POINTS_BATCH_SIZE + i].ModSub(&minusPoints[i].x);
+
+                    Int diffX;
+                    diffX.Set(&startPointX);
+                    diffX.ModSub(&pointBatchX[POINTS_BATCH_SIZE + i]);
+                    diffX.ModMulK1(&slope);
+                    
+                    pointBatchY[POINTS_BATCH_SIZE + i].Set(&startPointY);
+                    pointBatchY[POINTS_BATCH_SIZE + i].ModNeg();
+                    pointBatchY[POINTS_BATCH_SIZE + i].ModAdd(&diffX);
+                }
+
+                for (int i = 0; i < fullBatchSize; i++) {
+                    Point tempPoint;
+                    tempPoint.x.Set(&pointBatchX[i]);
+                    tempPoint.y.Set(&pointBatchY[i]);
+                    
+                    pointToCompressedBin(tempPoint, localPubKeys[localBatchCount]);
+                    pointIndices[localBatchCount] = i;
+                    localBatchCount++;
+
+                    if (localBatchCount == HASH_BATCH_SIZE) {
                         computeHash160BatchBinSingle(localBatchCount, localPubKeys, localHashResults);
-                        // Results check
+
                         for (int j = 0; j < HASH_BATCH_SIZE; j++) {
                             __m256i cand32 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(localHashResults[j]));
                             __m256i cmp32 = _mm256_cmpeq_epi8(cand32, target32);
                             int mask32 = _mm256_movemask_epi8(cmp32);
-                            // Use the g_prefixLength variable for comparison
+
                             if ((mask32 & ((1 << g_prefixLength) - 1)) == ((1 << g_prefixLength) - 1)) {
-                                // If the first g_prefixLength bytes match, perform a memcmp to be sure
                                 if (!matchFound && std::memcmp(localHashResults[j], targetHash160.data(), g_prefixLength) == 0) {
                                     #pragma omp critical
                                     {
-                                        if (!matchFound) {
-                                            auto tEndTime = std::chrono::high_resolution_clock::now();
-                                            globalElapsedTime = std::chrono::duration<double>(tEndTime - tStart).count();
-                                            mkeysPerSec = (double)(globalComparedCount + localComparedCount) / globalElapsedTime / 1e6;
-                                            
-                                            // Recovering private key
-                                            Int matchingPrivateKey;
-                                            matchingPrivateKey.Set(&currentBatchKey);
-                                            int idx = pointIndices[j];
-                                            if (idx < 256) {
-                                                Int offset; offset.SetInt32(idx);
-                                                matchingPrivateKey.Add(&offset);
-                                            } else {
-                                                Int offset; offset.SetInt32(idx - 256);
-                                                matchingPrivateKey.Sub(&offset);
-                                            }
-                                            foundPrivateKeyHex = padHexTo64(intToHex(matchingPrivateKey));
-                                            Point matchedPoint;
-                                            matchedPoint.x.Set(&pointBatchX[idx]);
-                                            matchedPoint.y.Set(&pointBatchY[idx]);
-                                            foundPublicKeyHex = pointToCompressedHex(matchedPoint);
+                                        auto tEndTime = std::chrono::high_resolution_clock::now();
+                                        globalElapsedTime = std::chrono::duration<double>(tEndTime - tStart).count();
+                                        mkeysPerSec = (double)(globalComparedCount + localComparedCount) / globalElapsedTime / 1e6;
+                                        
+                                        Int matchingPrivateKey;
+                                        matchingPrivateKey.Set(&currentBatchKey);
+                                        
+                                        int idx = pointIndices[j];
+                                        if (idx < 256) {
+                                            Int offset; offset.SetInt32(idx);
+                                            matchingPrivateKey.Add(&offset);
+                                        } else {
+                                            Int offset; offset.SetInt32(idx - 256);
+                                            matchingPrivateKey.Sub(&offset);
+                                        }
+                                        
+                                        foundPrivateKeyHex = padHexTo64(intToHex(matchingPrivateKey));
+                                        Point matchedPoint;
+                                        matchedPoint.x.Set(&pointBatchX[idx]);
+                                        matchedPoint.y.Set(&pointBatchY[idx]);
+                                        foundPublicKeyHex = pointToCompressedHex(matchedPoint);
 
-                                            bool bytesMatch = true;
+                                        bool bytesMatch = true;
+                                        for (int b = 0; b < 20; b++) {
+                                            if (localHashResults[j][b] != targetHash160.data()[b]) {
+                                                bytesMatch = false;
+                                                break;
+                                            }
+                                        }
+
+                                        if (bytesMatch) {
+                                            matchFound = true;
+                                        } else {
+                                            matchFound = false;
+                                            std::lock_guard<std::mutex> lock(coutMutex);
+                                            std::cout << "\033[15;1H";
+                                            std::cout << "\033[K";
+                                            std::cout << "================== PARTIAL MATCH FOUND! ============\n";
+                                            std::cout << "Prefix length : " << g_prefixLength << " bytes\n";
+                                            std::cout << "Private Key   : " << foundPrivateKeyHex << "\n";
+                                            std::cout << "Public Key    : " << foundPublicKeyHex << "\n";
+                                            std::cout << "Found Hash160 : ";
                                             for (int b = 0; b < 20; b++) {
-                                                if (localHashResults[j][b] != targetHash160.data()[b]) {
-                                                    bytesMatch = false;
-                                                    break;
-                                                }
+                                                printf("%02x", localHashResults[j][b]);
                                             }
-                                            if (bytesMatch) {
-                                                matchFound = true;
-                                            } else {
-                                                matchFound = false;
-                                                // Print the partial match information
-                                                std::lock_guard<std::mutex> lock(coutMutex);
-                                                std::cout << "\033[15;1H";
-                                                std::cout << "\033[K";
-                                                std::cout << "================== PARTIAL MATCH FOUND! ============\n";
-                                                std::cout << "Prefix length : " << g_prefixLength << " bytes" << "\n";
-                                                std::cout << "Private Key   : " << foundPrivateKeyHex << "\n";
-                                                std::cout << "Public Key    : " << foundPublicKeyHex << "\n";
-                                                std::cout << "Found Hash160 : ";
-                                                for (int b = 0; b < 20; b++) {
-                                                    printf("%02x", localHashResults[j][b]);
-                                                }
-                                                std::cout << "\n";
-                                                std::cout << "Target Hash160: ";
-                                                for (int b = 0; b < 20; b++) {
-                                                    printf("%02x", targetHash160.data()[b]);
-                                                }
-                                                std::cout << "\n";
-                                                std::cout << "Matched bytes : ";
-                                                for (int b = 0; b < g_prefixLength; b++) {
-                                                    printf("%02x", targetHash160.data()[b]);
-                                                }
-                                                std::cout << std::endl;
-                                                std::cout.flush();
-                                                std::ofstream partialFile("MATCH.txt", std::ios::app);
-                                                if (partialFile.is_open()) {
-                                                    partialFile << "================== PARTIAL MATCH FOUND! ============\n";
-                                                    partialFile << "Prefix length : " << g_prefixLength << " bytes" << "\n";
-                                                    partialFile << "Private Key   : " << foundPrivateKeyHex << "\n";
-                                                    partialFile << "Public Key    : " << foundPublicKeyHex << "\n";
-                                                    partialFile << "Found Hash160 : ";
-                                                    for (int b = 0; b < 20; b++) {
-                                                        partialFile << std::setw(2) << std::setfill('0') << std::hex 
-                                                                    << static_cast<unsigned int>(localHashResults[j][b]);
-                                                    }
-                                                    partialFile << "\n";
-                                                    partialFile << "Target Hash160: ";
-                                                    for (int b = 0; b < 20; b++) {
-                                                        partialFile << std::setw(2) << std::setfill('0') << std::hex 
-                                                                    << static_cast<unsigned int>(targetHash160.data()[b]);
-                                                    }
-                                                    partialFile << "\n";
-                                                    partialFile << "Matched bytes : ";
-                                                    for (int b = 0; b < g_prefixLength; b++) {
-                                                        partialFile << std::setw(2) << std::setfill('0') << std::hex 
-                                                                    << static_cast<unsigned int>(targetHash160.data()[b]);
-                                                    }
-                                                    partialFile << std::endl;
-                                                    partialFile.close();
-                                                } else {
-                                                    std::cerr << "Could not open file " << "MATCH.txt" << "for writing.\n";
-                                                }
+                                            std::cout << "\n";
+                                            std::cout << "Target Hash160: ";
+                                            for (int b = 0; b < 20; b++) {
+                                                printf("%02x", targetHash160.data()[b]);
                                             }
+                                            std::cout << "\n";
+                                            std::cout << "Matched bytes : ";
+                                            for (int b = 0; b < g_prefixLength; b++) {
+                                                printf("%02x", targetHash160.data()[b]);
+                                            }
+                                            std::cout << std::endl;
+                                            std::cout.flush();
 
+                                            std::ofstream partialFile("MATCH.txt", std::ios::app);
+                                            if (partialFile.is_open()) {
+                                                partialFile << "================== PARTIAL MATCH FOUND! ============\n";
+                                                partialFile << "Prefix length : " << g_prefixLength << " bytes\n";
+                                                partialFile << "Private Key   : " << foundPrivateKeyHex << "\n";
+                                                partialFile << "Public Key    : " << foundPublicKeyHex << "\n";
+                                                partialFile << "Found Hash160 : ";
+                                                for (int b = 0; b < 20; b++) {
+                                                    partialFile << std::setw(2) << std::setfill('0') << std::hex 
+                                                                << static_cast<unsigned int>(localHashResults[j][b]);
+                                                }
+                                                partialFile << "\n";
+                                                partialFile << "Target Hash160: ";
+                                                for (int b = 0; b < 20; b++) {
+                                                    partialFile << std::setw(2) << std::setfill('0') << std::hex 
+                                                                << static_cast<unsigned int>(targetHash160.data()[b]);
+                                                }
+                                                partialFile << "\n";
+                                                partialFile << "Matched bytes : ";
+                                                for (int b = 0; b < g_prefixLength; b++) {
+                                                    partialFile << std::setw(2) << std::setfill('0') << std::hex 
+                                                                << static_cast<unsigned int>(targetHash160.data()[b]);
+                                                }
+                                                partialFile << std::endl;
+                                                partialFile.close();
+                                            } else {
+                                                std::cerr << "Could not open MATCH.txt for writing.\n";
+                                            }
                                         }
                                     }
                                     #pragma omp cancel parallel
@@ -1085,13 +1012,12 @@ Int minKey, maxKey;
                     }
                 }
 
-                // Next step
                 if (!randomMode) {
-                Int step; step.SetInt32(stride * (fullBatchSize - 2));
-                privateKey.Add(&step);
+                    Int step; 
+                    step.SetInt32(stride * (fullBatchSize - 2));
+                    privateKey.Add(&step);
                 }
 
-                // Time to show status
                 auto now = std::chrono::high_resolution_clock::now();
                 double secondsSinceStatus = std::chrono::duration<double>(now - lastStatusTime).count();
                 if (secondsSinceStatus >= statusIntervalSec) {
@@ -1101,19 +1027,16 @@ Int minKey, maxKey;
                         localComparedCount = 0ULL;
                         globalElapsedTime = std::chrono::duration<double>(now - tStart).count();
                         mkeysPerSec = (double)globalComparedCount / globalElapsedTime / 1e6;
-
+                        
                         long double progressPercent = 0.0L;
                         if (!randomMode) {
-                        // Only calculate progress in sequential mode
-                        if (totalRangeLD > 0.0000L) {
-                        progressPercent = ((long double)globalComparedCount / totalRangeLD) * 100.0L;
-                        if (progressPercent > 100.0000L) {
-                        progressPercent = 100.0000L; // Cap progress at 100%
-                                }
+                            if (totalRangeLD > 0.0000L) {
+                                progressPercent = ((long double)globalComparedCount / totalRangeLD) * 100.0L;
+                                if (progressPercent > 100.0000L)
+                                    progressPercent = 100.0000L;
                             }
                         }
-
-                        // Print status block without partial match information
+                        
                         printStatsBlock(numCPUs, targetHash160Hex, displayRange,
                                        mkeysPerSec, globalComparedCount,
                                        globalElapsedTime, puzzle, randomMode, "",
@@ -1122,7 +1045,6 @@ Int minKey, maxKey;
                     }
                 }
 
-                // Save progress (only in sequential mode)
                 auto nowSave = std::chrono::high_resolution_clock::now();
                 double secondsSinceSave = std::chrono::duration<double>(nowSave - lastSaveTime).count();
                 if (!randomMode && secondsSinceSave >= saveProgressIntervalSec && threadId == 0) {
@@ -1148,18 +1070,16 @@ Int minKey, maxKey;
                 if (matchFound) {
                     break;
                 }
-            } // while(true)
+            } // end of while (not matchFound)
 
-            // Adding local count
             #pragma omp atomic
             globalComparedCount += localComparedCount;
         } // end of parallel section
 
-        // Main results
         auto tEnd = std::chrono::high_resolution_clock::now();
         globalElapsedTime = std::chrono::duration<double>(tEnd - tStart).count();
 
-        if (!matchFound) {
+if (!matchFound) {
             std::cout << "\033[14;1H";
             std::cout << "\033[K";
             std::cout << "================= NO MATCH FOUND =================";               
